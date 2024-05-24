@@ -4,6 +4,7 @@ from pymoo.indicators.hv import HV
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 from pymoo.operators.selection.tournament import compare
 import json
+from copy import deepcopy
 
 
 
@@ -20,9 +21,8 @@ class Population(ABC):
         self.nfe = 0
 
         # Saved designs and evals
-        self.unique_designs = set()
-        self.unique_designs_lst = []
-        self.unique_designs_vals = []
+        self.unique_designs_bitstr = set()
+        self.unique_designs = []
 
     def init_population(self, *args, **kwargs):
         self.designs = []
@@ -43,10 +43,9 @@ class Population(ABC):
         for design in self.designs:
             objs = design.evaluate()
             design_str = design.get_design_str()
-            if design_str not in self.unique_designs:
-                self.unique_designs.add(design_str)
-                self.unique_designs_lst.append(design)
-                self.unique_designs_vals.append(objs)
+            if design_str not in self.unique_designs_bitstr:
+                self.unique_designs_bitstr.add(design_str)
+                self.unique_designs.append(deepcopy(design))
                 self.nfe += 1
             objectives.append(objs)
         return objectives

@@ -20,6 +20,8 @@ class PartitioningDesign(Design):
                 self.vector[i] = random.randint(0, num_sets)
 
     def evaluate(self):
+        if self.is_evaluated():
+            return self.objectives
         synergy, weight, overweight = self.problem.evaluate(self.vector)
         self.objectives = [synergy, weight]
         self.feasibility_score = overweight

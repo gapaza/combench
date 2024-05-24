@@ -14,7 +14,7 @@ class UnconstrainedPop(Population):
 
     def calc_hv(self):
         # objectives = self.eval_population()
-        objectives = self.unique_designs_vals
+        objectives = [design.objectives for design in self.unique_designs]
         if len(objectives) == 0:
             return 0.0
         F = np.array(objectives)
@@ -91,7 +91,6 @@ class UnconstrainedPop(Population):
 
 from combench.models.salesman import problem1
 from combench.models.salesman.TravelingSalesman import TravelingSalesman
-
 
 if __name__ == '__main__':
 

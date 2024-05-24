@@ -1,6 +1,7 @@
 import config
 import json
 import numpy as np
+from copy import deepcopy
 
 from combench.ga.UnconstrainedPop import UnconstrainedPop
 from combench.models.gnc.design import GncDesign as Design
@@ -35,10 +36,9 @@ class GncPopulation(UnconstrainedPop):
         for design in self.designs:
             objs = design.evaluate()
             design_str = design.get_design_str()
-            if design_str not in self.unique_designs:
-                self.unique_designs.add(design_str)
-                self.unique_designs_lst.append(design)
-                self.unique_designs_vals.append(objs)
+            if design_str not in self.unique_designs_bitstr:
+                self.unique_designs_bitstr.add(design_str)
+                self.unique_designs.append(deepcopy(design))
                 self.nfe += 1
             objectives.append(objs)
         return objectives

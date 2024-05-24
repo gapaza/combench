@@ -95,7 +95,8 @@ class NSGA2:
 
         # 3. Plot all designs
         x_vals, y_vals = [], []
-        for designs_vals in self.population.unique_designs_vals:
+        for design in self.population.unique_designs:
+            designs_vals = design.get_plotting_objectives()
             x_vals.append(designs_vals[0])
             y_vals.append(designs_vals[1])
         plt.figure(figsize=(8, 8))
