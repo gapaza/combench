@@ -72,11 +72,18 @@ def generateC(sel, rvar, NC, CA, Avar, E, C, sidenum):
 
             qrvec = qvec + rvec
             newK = K[np.ix_(qrvec, qrvec)]  # Extract submatrix from K
+
             K_qq = newK[:len(qvec), :len(qvec)]  # Extract submatrix from K_qq (top left)
             K_rq = newK[len(qvec):, :len(qvec)]  # Extract submatrix from K_rq (bottom left)
             K_qr = newK[:len(qvec), len(qvec):]  # Extract submatrix from K_qr (top right)
             K_rr = newK[len(qvec):, len(qvec):]  # Extract submatrix from K_rr (bottom right)
-            u_q = np.linalg.solve(K_qq, np.array(F_q) - K_qr @ np.array(u_r)) # Solve for displacements at free nodes
+            try:
+                u_q = np.linalg.solve(K_qq, np.array(F_q) - K_qr @ np.array(u_r)) # Solve for displacements at free nodes
+            except np.linalg.LinAlgError:
+                # print("Singular matrix")
+                # u_q = np.zeros(len(F_q))
+                return None
+                # exit(0)
             F_r = K_rq @ u_q + K_rr @ np.array(u_r)  # Calculate forces at restrained nodes
             altu = np.concatenate((u_q, u_r))
             altF = np.concatenate((F_q, F_r))

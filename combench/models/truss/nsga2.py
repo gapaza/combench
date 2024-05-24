@@ -1,11 +1,13 @@
+import config
+import json
 import numpy as np
 import random
 
+from combench.ga.NSGA2 import NSGA2
 from combench.interfaces.design import Design
 from combench.ga.UnconstrainedPop import UnconstrainedPop
 
-
-class PartitioningDesign(Design):
+class TrussDesign(Design):
     def __init__(self, vector, problem):
         super().__init__(vector, problem)
 
@@ -14,58 +16,52 @@ class PartitioningDesign(Design):
 
     def mutate(self):
         prob_mutate = 1.0 / self.num_vars
-        num_sets = len(set(self.vector))
         for i in range(self.num_vars):
             if random.random() < prob_mutate:
-                self.vector[i] = random.randint(0, num_sets)
+                if self.vector[i] == 0:
+                    self.vector[i] = 1
+                else:
+                    self.vector[i] = 0
 
     def evaluate(self):
-        synergy, weight, overweight = self.problem.evaluate(self.vector)
-        self.objectives = [synergy, weight]
-        self.feasibility_score = overweight
-        self.is_feasible = True  # Assume all overweight designs are feasible for now
+        if self.is_evaluated() is True:
+            return self.objectives
+        v_stiff, vol_frac = self.problem.evaluate(self.vector)
+        self.objectives = [v_stiff, vol_frac]
+        self.is_feasible = True
         return self.objectives
 
     def get_plotting_objectives(self):
         return [-self.objectives[0], self.objectives[1]]
 
 
-class PartitioningPopulation(UnconstrainedPop):
+class TrussPopulation(UnconstrainedPop):
 
     def __init__(self, pop_size, ref_point, problem):
         super().__init__(pop_size, ref_point, problem)
 
     def create_design(self, vector=None):
-        design = PartitioningDesign(vector, self.problem)
+        design = TrussDesign(vector, self.problem)
         return design
 
 
 
-from combench.models.partitioning import problem1
-from combench.ga.NSGA2 import NSGA2
-from combench.models.partitioning.SetPartitioning import SetPartitioning
-
+from combench.models.truss import problem1
+from combench.models.truss.TrussModel import TrussModel
 
 if __name__ == '__main__':
 
-    # Problem
-    problem = SetPartitioning(problem1)
+    problem = TrussModel(problem1)
 
     # Population
     pop_size = 30
     ref_point = np.array([0, 1])
-    pop = PartitioningPopulation(pop_size, ref_point, problem)
+    pop = TrussPopulation(pop_size, ref_point, problem)
 
     # NSGA2
-    max_nfe = 10000
-    nsga2 = NSGA2(pop, problem, max_nfe, run_name='set-partitioning')
+    max_nfe = 300
+    nsga2 = NSGA2(pop, problem, max_nfe, run_name='truss')
     nsga2.run()
-
-
-
-
-
-
 
 
 

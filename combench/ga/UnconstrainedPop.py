@@ -13,11 +13,13 @@ class UnconstrainedPop(Population):
         return Design(vector, self.problem)
 
     def calc_hv(self):
-        objectives = self.eval_population()
+        # objectives = self.eval_population()
+        objectives = self.unique_designs_vals
         if len(objectives) == 0:
             return 0.0
         F = np.array(objectives)
         hv = self.hv_client.do(F)
+        # print(hv, objectives)
         return hv
 
     def prune(self):

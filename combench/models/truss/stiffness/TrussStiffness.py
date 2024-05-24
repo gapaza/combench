@@ -42,12 +42,10 @@ class TrussStiffness:
         rvar = member_radii * np.ones(CA.shape[0])  # Radii of truss elements
 
         C = TrussStiffness.get_stiffness_tensor(sidenum, sidelen, rvar, y_modulus, CA)
+        if C is None:
+            return None
         c11_vstiff = C[0, 0]  # Vertical stiffness
         c22_hstiff = C[1, 1]  # Horizontal stiffness
-
-        # print('Vertical Stiffness: ', c11_vstiff)
-        # print('Horizontal Stiffness: ', c22_hstiff)
-
         stiffness_ratio = 0
         if c22_hstiff != 0:
             stiffness_ratio = c11_vstiff / c22_hstiff
@@ -59,44 +57,15 @@ class TrussStiffness:
         rvar = member_radii * np.ones(CA.shape[0])  # Radii of truss elements
         NC = np.array(new_nodes)
         C = TrussStiffness.get_stiffness_tensor(sidenum, sidelen, rvar, y_modulus, CA, NC=NC)
+        if C is None:
+            return None
         c11_vstiff = C[0, 0]  # Vertical stiffness
         c22_hstiff = C[1, 1]  # Horizontal stiffness
-
-        # print('Vertical Stiffness: ', c11_vstiff)
-        # print('Horizontal Stiffness: ', c22_hstiff)
-
         stiffness_ratio = 0
         if c22_hstiff != 0:
             stiffness_ratio = c11_vstiff / c22_hstiff
         return c11_vstiff, c22_hstiff, stiffness_ratio
 
-    @staticmethod
-    def evaluate_bitstr(bitstr, sidenum, unit_len, y_modulus, member_rads):
-        # If bitstr is a string, convert to list of ints
-        if isinstance(bitstr, str):
-            bitstr = [int(bit) for bit in bitstr]
-
-
-        # Get the connectivity array
-        features = TrussFeatures(bitstr, sidenum, None)
-        CA = np.array(features.design_conn_array)
-
-        print(CA)
-
-        rvar = member_rads * np.ones(CA.shape[0])  # Radii of truss elements
-
-        # Calculate the stiffness tensor
-        C = TrussStiffness.get_stiffness_tensor(sidenum, unit_len, rvar, y_modulus, CA)
-
-        # Print the result
-        # print("Stiffness Tensor (C):")
-        # print(C)
-
-        c11_vstiff = C[0, 0]  # Vertical stiffness
-        c22_hstiff = C[1, 1]  # Horizontal stiffness
-
-        print('Vertical Stiffness: ', c11_vstiff)
-        print('Horizontal Stiffness: ', c22_hstiff)
 
 
     # NOTE: sel MUST be the total length of the truss side
@@ -129,12 +98,12 @@ class TrussStiffness:
         # print("C: ", C)
         # print("sidenum: ", sidenum)
 
-        C, uBasket, fBasket = generateC(sel, rvar, NC, CA, Avar, E, C, sidenum)
-
-        # print('uBasket: ', uBasket)
-        # print('fBasket: ', fBasket)
-
-        return C
+        results = generateC(sel, rvar, NC, CA, Avar, E, C, sidenum)
+        if results is None:
+            return None
+        else:
+            C, uBasket, fBasket = results
+            return C
 
 
     @staticmethod
