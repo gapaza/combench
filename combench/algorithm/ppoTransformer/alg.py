@@ -37,6 +37,7 @@ from combench.models.assigning import problem1 as problem
 from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
 from combench.models.assigning.nsga2 import AssigningPop as Population
 from combench.models.assigning.nsga2 import AssigningDesign as Design
+from combench.ga.NSGA2 import BenchNSGA2
 
 
 class UnconstrainedPPO(Algorithm):
@@ -51,8 +52,6 @@ class UnconstrainedPPO(Algorithm):
         self.critic_path = critic_path
         self.hv = []
         self.nfes = []
-        self.hv_file = os.path.join(self.save_dir, 'population_hv.png')
-
 
         # Objective Weights
         num_keys = 9
@@ -104,7 +103,7 @@ class UnconstrainedPPO(Algorithm):
             self.record()
             self.curr_epoch += 1
             if self.curr_epoch % 10 == 0:
-                self.population.plot_hv(self.hv_file)
+                self.population.plot_hv(self.save_dir)
 
     def get_cond_vars(self):
         weight_samples = []

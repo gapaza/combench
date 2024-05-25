@@ -5,6 +5,7 @@ from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 from pymoo.operators.selection.tournament import compare
 import json
 from copy import deepcopy
+import os
 import matplotlib.pyplot as plt
 
 
@@ -34,11 +35,6 @@ class Population(ABC):
         for i in range(self.pop_size):
             design = self.create_design()
             self.designs.append(design)
-
-    def save_population(self, file_path):
-        save_data = [design.get_design_json() for design in self.designs]
-        with open(file_path, 'w') as f:
-            json.dump(save_data, f)
 
     def add_designs(self, designs):
         self.designs.extend(designs)
@@ -111,16 +107,68 @@ class Population(ABC):
         self.nfes.append(deepcopy(self.nfe))
 
     def plot_hv(self, save_path):
+        plot_file = os.path.join(save_path, 'population_hv.png')
+        json_file = os.path.join(save_path, 'population_hv.json')
         plt.figure(figsize=(8, 8))
         plt.plot(self.nfes, self.hv)
         plt.xlabel('NFE')
         plt.ylabel('HV')
         plt.title('HV Progress')
-        plt.savefig(save_path)
+        plt.savefig(plot_file)
         plt.close('all')
         save_obj = [(nfe, hv) for nfe, hv in zip(self.nfes, self.hv)]
-        with open(save_path.replace('.png', '.json'), 'w') as f:
+        with open(json_file, 'w') as f:
             json.dump(save_obj, f)
+
+    def plot_population(self, save_dir):
+        pareto_plot_file = os.path.join(save_dir, 'designs_pareto.png')
+        pareto_json_file = os.path.join(save_dir, 'designs_pareto.json')
+        all_plot_file = os.path.join(save_dir, 'designs_all.png')
+
+        # Pareto designs
+        x_vals_f, y_vals_f = [], []
+        x_vals_i, y_vals_i = [], []
+        for design in self.designs:
+            objectives = design.get_plotting_objectives()
+            if design.is_feasible is True:
+                x_vals_f.append(objectives[0])
+                y_vals_f.append(objectives[1])
+            else:
+                x_vals_i.append(objectives[0])
+                y_vals_i.append(objectives[1])
+        plt.figure(figsize=(8, 8))
+        plt.xlabel('Objective 1')
+        plt.ylabel('Objective 2')
+        plt.scatter(x_vals_f, y_vals_f, c='b', label='Feasible Designs')
+        plt.scatter(x_vals_i, y_vals_i, c='r', label='Infeasible Designs')
+        plt.title('Pareto Front')
+        plt.legend()
+        plt.savefig(pareto_plot_file)
+        plt.close('all')
+        save_obj = [design.get_design_json() for design in self.designs if design.is_feasible]
+        with open(pareto_json_file, 'w') as f:
+            json.dump(save_obj, f)
+
+        # All designs
+        x_vals_f, y_vals_f = [], []
+        x_vals_i, y_vals_i = [], []
+        for design in self.unique_designs:
+            objectives = design.get_plotting_objectives()
+            if design.is_feasible is True:
+                x_vals_f.append(objectives[0])
+                y_vals_f.append(objectives[1])
+            else:
+                x_vals_i.append(objectives[0])
+                y_vals_i.append(objectives[1])
+        plt.figure(figsize=(8, 8))
+        plt.xlabel('Objective 1')
+        plt.ylabel('Objective 2')
+        plt.scatter(x_vals_f, y_vals_f, c='b', label='Feasible Designs')
+        plt.scatter(x_vals_i, y_vals_i, c='r', label='Infeasible Designs')
+        plt.title('All Designs')
+        plt.legend()
+        plt.savefig(all_plot_file)
+        plt.close('all')
 
     @abstractmethod
     def calc_hv(self, *args, **kwargs):

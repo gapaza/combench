@@ -31,7 +31,7 @@ class Design(ABC):
 
     @abstractmethod
     def random_design(self):
-        return d_utils.random_binary_design(self.num_vars)
+        return self.problem.random_design()
 
     @abstractmethod
     def mutate(self):

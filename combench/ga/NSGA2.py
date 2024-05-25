@@ -1,11 +1,60 @@
 from tqdm import tqdm
 from copy import deepcopy
 import os
+import config
 import matplotlib.pyplot as plt
 import json
+import numpy as np
+import pandas as pd
+
+class BenchNSGA2:
+
+    def __init__(self, problem, max_nfe, run_name='runner'):
+        self.problem = problem
+        self.max_nfe = max_nfe
+        self.run_name = run_name
+        self.nsga2_name = 'nsga2'
+
+        # Save
+        self.run_name = run_name
+        self.save_dir = os.path.join(config.results_dir, run_name)
+        if not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
+        self.results_file = os.path.join(self.save_dir, 'results.json')
+
+    def load_results(self):
+        if os.path.exists(self.results_file):
+            with open(self.results_file, 'r') as f:
+                results = json.load(f)
+        else:
+            results = []
+        return results
+
+    def plot_results(self, comparison=None):
+        results = self.load_results()
+        dfs = []
+        for alg_run in results:
+            nfe, hv = zip(*alg_run)
+            min_nfe, max_nfe = min(nfe), max(nfe)
+            nfe_space = np.linspace(min_nfe, max_nfe, len(hv))
+            hv_interp = np.linspace(nfe_space, nfe, hv)
+            df = pd.DataFrame({'nfe': nfe_space, 'hv': hv_interp, 'label': self.nsga2_name})
+            dfs.append(df)
 
 
-import config
+
+        pass
+
+    def run(self, populations):
+        results = []
+        for pop in populations:
+            nsga2 = NSGA2(pop, self.problem, self.max_nfe, run_name=self.nsga2_name)
+            result = nsga2.run()
+            results.append(result)
+            with open(self.results_file, 'w') as f:
+                json.dump(results, f, indent=4)
+            print('Results saved to {}'.format(self.results_file))
+        return results
 
 
 class NSGA2:
@@ -15,10 +64,6 @@ class NSGA2:
         self.population = population
         self.problem = problem
         self.max_nfe = max_nfe
-
-        # Metrics
-        self.hv = []
-        self.nfe = []
 
         # Save
         self.run_name = run_name
@@ -46,80 +91,15 @@ class NSGA2:
             self.population.prune()
 
             # Log iteration
-            self.record()
+            self.population.record()
             update_delta = self.population.nfe - curr_nfe
             progress_bar.update(update_delta)
 
-        pop_save_file = os.path.join(self.save_dir, 'population.json')
-        self.population.save_population(pop_save_file)
-        self.plot_run()
-
-        results = [(nfe, hv) for nfe, hv in zip(self.nfe, self.hv)]
-        with open(os.path.join(self.save_dir, 'hv_progress.json'), 'w') as f:
-            json.dump(results, f)
+        # Plot hv and population
+        self.population.plot_population(self.save_dir)
+        self.population.plot_hv(self.save_dir)
+        results = [(nfe, hv) for nfe, hv in zip(self.population.nfes, self.population.hv)]
         return results
-
-
-    def record(self):
-        self.population.record()
-
-    def plot_run(self):
-
-        # 1. Plot HV
-        hv_plot_path = os.path.join(self.save_dir, 'population_hv.png')
-        self.population.plot_hv(hv_plot_path)
-
-        # 2. Plot pareto designs
-        x_vals, y_vals = [], []
-        for design in self.population.designs:
-            if design.is_feasible is False:
-                continue
-            plot_objs = design.get_plotting_objectives()
-            x_vals.append(plot_objs[0])
-            y_vals.append(plot_objs[1])
-        plt.figure(figsize=(8, 8))
-        plt.xlabel('Objective 1')
-        plt.ylabel('Objective 2')
-        plt.scatter(x_vals, y_vals, c='b', label='Feasible Designs')
-        plt.title('Pareto Designs')
-        design_plot_file = os.path.join(self.save_dir, 'pareto_plot.png')
-        plt.savefig(design_plot_file)
-        plt.close('all')
-
-        # 3. Plot all designs
-        x_vals, y_vals, colors = [], [], []
-        for design in self.population.unique_designs:
-            designs_vals = design.get_plotting_objectives()
-            x_vals.append(designs_vals[0])
-            y_vals.append(designs_vals[1])
-            if design.is_feasible:
-                colors.append('b')
-            else:
-                colors.append('r')
-
-
-
-        plt.figure(figsize=(8, 8))
-        plt.xlabel('Objective 1')
-        plt.ylabel('Objective 2')
-
-        # First plot infeasible designs
-        plt.scatter([x for x, c in zip(x_vals, colors) if c == 'r'],
-                    [y for y, c in zip(y_vals, colors) if c == 'r'],
-                    c='r', label='Infeasible Designs')
-        # Then plot feasible designs
-        plt.scatter([x for x, c in zip(x_vals, colors) if c == 'b'],
-                    [y for y, c in zip(y_vals, colors) if c == 'b'],
-                    c='b', label='Feasible Designs')
-
-
-        plt.title('All Designs')
-        design_plot_file = os.path.join(self.save_dir, 'all_designs_plot.png')
-        plt.savefig(design_plot_file)
-        plt.close('all')
-
-
-
 
 
 
