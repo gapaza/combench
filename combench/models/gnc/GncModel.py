@@ -1,11 +1,10 @@
-from combench.models.gnc.utils import enumerate_binary_strings
 import config
 from copy import deepcopy
 import math
 import random
 from combench.models.utils import random_binary_design
 from tqdm import tqdm
-from combench.interfaces.model import Model
+from combench.core.model import Model
 import multiprocessing
 
 # spawn new processes
@@ -61,8 +60,7 @@ class GncModel(Model):
 
     def evaluate_batch(self, designs, normalize=False):
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-            results = list(
-                pool.imap(self._evaluate_single_design, [(design, normalize) for design in designs]))
+            results = list(pool.imap(self._evaluate_single_design, [(design, normalize) for design in designs]))
         return results
 
     def _evaluate_single_design(self, args):
@@ -339,6 +337,30 @@ class GncModel(Model):
             else:
                 prob *= (1 - self.connection_reliability)
         return prob
+
+
+def enumerate_binary_strings(n):
+    """
+        Generate all binary strings of length n.
+
+        :param n: Length of the binary strings.
+        :return: List of binary strings of length n.
+        """
+    if n < 1:
+        return []
+
+    result = []
+
+    def backtrack(current):
+        if len(current) == n:
+            result.append(current)
+            return
+        backtrack(current + '0')
+        backtrack(current + '1')
+
+    backtrack('')
+    return result
+
 
 
 from combench.models.gnc import problem1

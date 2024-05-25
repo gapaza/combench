@@ -1,7 +1,7 @@
-from combench.interfaces.population import Population
+from combench.core.population import Population
 import numpy as np
 
-from combench.interfaces.design import Design
+from combench.core.design import Design
 from combench.ga import utils as ga_utils
 
 
@@ -83,7 +83,7 @@ class UnconstrainedPop(Population):
             parent1 = pair[0]
             parent2 = pair[1]
             child = self.create_design()
-            child.crossover(parent1, parent2)
+            # child.crossover(parent1, parent2)
             child.mutate()
             offspring.append(child)
         self.designs.extend(offspring)

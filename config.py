@@ -1,4 +1,8 @@
 import os
+import tensorflow as tf
+
+# disable gpu
+tf.config.set_visible_devices([], 'GPU')
 
 #
 #       _____   _                   _                _

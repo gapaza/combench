@@ -3,7 +3,7 @@ import numpy as np
 from combench.models.salesman import problem1
 from combench.models.salesman.TravelingSalesman import TravelingSalesman
 from combench.ga.UnconstrainedPop import UnconstrainedPop
-from combench.interfaces.design import Design
+from combench.core.design import Design
 import random
 
 class TSDesign(Design):

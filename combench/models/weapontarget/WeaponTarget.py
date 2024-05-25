@@ -1,5 +1,5 @@
 import numpy as np
-from combench.interfaces.model import Model
+from combench.core.model import Model
 import random
 
 

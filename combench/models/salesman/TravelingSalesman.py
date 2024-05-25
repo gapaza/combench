@@ -1,5 +1,5 @@
 import math
-from combench.interfaces.model import Model
+from combench.core.model import Model
 import random
 
 

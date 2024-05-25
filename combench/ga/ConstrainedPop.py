@@ -1,7 +1,7 @@
-from combench.interfaces.population import Population
+from combench.core.population import Population
 import numpy as np
 
-from combench.interfaces.design import Design
+from combench.core.design import Design
 from combench.ga import utils as ga_utils
 
 

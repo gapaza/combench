@@ -1,7 +1,7 @@
 import numpy as np
 import math
-from combench.interfaces.model import Model
-
+from combench.core.model import Model
+from combench.models.utils import random_binary_design
 
 class GeneralAssigning(Model):
 
@@ -12,8 +12,50 @@ class GeneralAssigning(Model):
         self.costs = problem_formulation['costs']
         self.profits = problem_formulation['profits']
         self.budgets = problem_formulation['budgets']
+        self.norms = self.load_norms()
+        print('Norm values: {}'.format(self.norms))
 
-    def evaluate(self, design):
+
+
+    def load_norms(self):
+        if 'norms' in self.problem_store:
+            return self.problem_store['norms']
+
+        # Calculate the norms
+        random_designs = [self.random_design() for _ in range(10000)]
+
+        evals = []
+        for design in random_designs:
+            objs = self.evaluate(design, normalize=False)
+            if objs[1] == 1e10:
+                continue
+            evals.append(objs)
+
+        max_profit = min([evals[i][0] for i in range(len(evals))])
+        max_cost = max([evals[i][1] for i in range(len(evals))])
+        profit_norm = abs(max_profit) * 1.1
+        cost_norm = max_cost * 1.1
+        self.problem_store['norms'] = [profit_norm, cost_norm]
+        self.save_problem_store()
+        return [profit_norm, cost_norm]
+
+
+    def random_design(self):
+        return random_binary_design(self.num_tasks * self.num_agents)
+
+    def evaluate(self, design, normalize=True):
+        profit, cost, overrun = self._evaluate(design)
+        if normalize is True:
+            if cost == 1e10:
+                profit = 0.0
+                cost = 1.0
+            else:
+                profit_norm, cost_norm = self.norms
+                profit = profit / profit_norm
+                cost = cost / profit_norm
+        return [profit, cost, overrun]
+
+    def _evaluate(self, design):
         # Reshape the design to a 2D array for easier handling
         assignment_matrix = np.reshape(design, (self.num_tasks, self.num_agents))
 
@@ -29,37 +71,23 @@ class GeneralAssigning(Model):
         # Check budget constraints
         valid_design = True
         total_cost = 0
+        budget_overruns = 0
         for agent in range(self.num_agents):
             total_cost += agent_costs[agent]
             if agent_costs[agent] > self.budgets[agent]:
                 valid_design = False
+                budget_overruns = abs(agent_costs[agent] - self.budgets[agent])
 
-        if not valid_design:
-            return 0, 100
-        else:
-            return total_profit, total_cost
+        # if not valid_design:
+        #     return 0, 1e10, 1e10
+        # else:
+        #     return -total_profit, total_cost, budget_overruns
+        return -total_profit, total_cost, budget_overruns
 
+
+from combench.models.assigning import problem1
 
 if __name__ == '__main__':
-    problem_formulation = {
-        'num_agents': 5,
-        'num_tasks': 5,
-        'costs': np.array([
-            [4, 2, 5, 6, 3],
-            [7, 5, 8, 6, 2],
-            [3, 9, 7, 4, 8],
-            [5, 4, 6, 2, 7],
-            [6, 7, 5, 3, 4]
-        ]),
-        'profits': np.array([
-            [8, 6, 7, 9, 5],
-            [6, 7, 8, 5, 4],
-            [5, 9, 6, 7, 8],
-            [7, 6, 8, 5, 9],
-            [9, 8, 7, 6, 5]
-        ]),
-        'budgets': np.array([15, 15, 15, 15, 15])
-    }
 
     # Example design
     design = [
@@ -71,7 +99,7 @@ if __name__ == '__main__':
     ]
 
     # Create instance and evaluate
-    ga = GeneralAssigning(problem_formulation)
+    ga = GeneralAssigning(problem1)
     objectives = ga.evaluate(design)
     print(objectives)
 

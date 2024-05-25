@@ -6,7 +6,7 @@ import math
 from combench.models.truss.vol.TrussVolumeFraction import TrussVolumeFraction
 from combench.models.truss.stiffness.TrussStiffness import TrussStiffness
 from combench.models.truss import sidenum_nvar_map
-from combench.interfaces.model import Model
+from combench.core.model import Model
 from combench.models.utils import random_binary_design
 
 

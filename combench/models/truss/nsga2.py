@@ -4,7 +4,7 @@ import numpy as np
 import random
 
 from combench.ga.NSGA2 import NSGA2
-from combench.interfaces.design import Design
+from combench.core.design import Design
 from combench.ga.UnconstrainedPop import UnconstrainedPop
 
 class TrussDesign(Design):
