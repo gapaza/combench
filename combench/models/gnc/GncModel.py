@@ -1,15 +1,20 @@
 import config
 from copy import deepcopy
 import math
+import numpy as np
 import random
 from combench.models.utils import random_binary_design
 from tqdm import tqdm
 from combench.core.model import Model
 import multiprocessing
+import time
 
 # spawn new processes
 # from multiprocessing import set_start_method
 # set_start_method('fork', force=True)
+
+# proc_pool = multiprocessing.Pool(8)
+
 
 class GncModel(Model):
 
@@ -19,6 +24,9 @@ class GncModel(Model):
         self.computers = problem_formulation['computers']['reliabilities']
         self.actuators = problem_formulation['actuators']['reliabilities']
         self.connection_reliability = problem_formulation['connection_reliability']
+        self.num_sensors = len(self.sensors)
+        self.num_computers = len(self.computers)
+        self.num_actuators = len(self.actuators)
 
         self.sensors_weights = problem_formulation['sensors']['weights']
         self.computers_weights = problem_formulation['computers']['weights']
@@ -27,15 +35,14 @@ class GncModel(Model):
         self.norms = self.load_norms()
         print('Norm values: {}'.format(self.norms))
 
-
     def load_norms(self):
         if 'norms' in self.problem_store:
             return self.problem_store['norms']
 
         # Calculate the norms
-        random_designs = [self.random_design() for _ in range(1000)]
+        random_designs = [[1 for _ in range(self.num_sensors * self.num_computers)] + [1 for _ in range(self.num_computers * self.num_actuators)]]
         # print(random_designs[0])
-        objs_batch = self.evaluate_batch(random_designs, normalize=False)
+        objs_batch = self.evaluate_batch(random_designs, normalize=False, track=True)
         evals = objs_batch
         max_reliability = min([evals[i][0] for i in range(len(evals))])
         max_mass = max([evals[i][1] for i in range(len(evals))])
@@ -45,7 +52,6 @@ class GncModel(Model):
         self.save_problem_store()
         return [reliability_norm, mass_norm]
 
-
     def random_design(self):
         sca_len = len(self.sensors) * len(self.computers)
         caa_len = len(self.computers) * len(self.actuators)
@@ -53,21 +59,28 @@ class GncModel(Model):
         design = random_binary_design(n)
         return design
 
-
     # ----------------------------------------------
     # Evaluate
     # ----------------------------------------------
 
-    def evaluate_batch(self, designs, normalize=False):
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-            results = list(pool.imap(self._evaluate_single_design, [(design, normalize) for design in designs]))
+    def evaluate_batch(self, designs, normalize=False, track=False):
+        # with multiprocessing.Pool(processes=1) as pool:
+        #     if track is False:
+        #         results = list(pool.imap(self._evaluate_single_design, [(design, normalize) for design in designs]))
+        #     else:
+        #         results = list(tqdm(pool.imap(self._evaluate_single_design, [(design, normalize) for design in designs]), total=len(designs)))
+        results = []
+        for design in designs:
+            result = self.evaluate(design, normalize)
+            results.append(result)
         return results
 
     def _evaluate_single_design(self, args):
         design, normalize = args
         return self.evaluate(design, normalize)
 
-    def evaluate(self, design, normalize=False):
+    def evaluate(self, design, normalize=True):
+        # print('Evaluating design')
         sca_len = len(self.sensors) * len(self.computers)
         caa_len = len(self.computers) * len(self.actuators)
         sensor_computer_assignment = design[:sca_len]
@@ -83,7 +96,10 @@ class GncModel(Model):
         # print("Reliability: ", reliability, " Mass: ", mass)
         return -reliability, mass
 
+
+
     def _evaluate(self, sensor_computer_assignment, computer_actuator_assignment, scale=False):
+        curr_time = time.time()
         # print("Evaluating design: ", sensor_computer_assignment, computer_actuator_assignment)
         sca_len = len(self.sensors) * len(self.computers)
         caa_len = len(self.computers) * len(self.actuators)
@@ -114,21 +130,25 @@ class GncModel(Model):
         self.design_computers_probs = [self.computers[x] for x in self.design_computers]
         self.design_actuators_probs = [self.actuators[x] for x in self.design_actuators]
         # print("Design sensors: ", self.design_sensors, " Design computers: ", self.design_computers, " Design actuators: ", self.design_actuators)
-        self.sensor_failures = self.generate_component_failures(self.design_sensors)
-        self.computer_failures = self.generate_component_failures(self.design_computers)
-        self.actuator_failures = self.generate_component_failures(self.design_actuators)
+        self.sensor_failures = self.generate_component_failures(self.design_sensors, self.sensors)
+        self.computer_failures = self.generate_component_failures(self.design_computers, self.computers)
+        self.actuator_failures = self.generate_component_failures(self.design_actuators, self.actuators)
 
         self.sensor_computer_connection_failures, self.sc_conn_list = self.generate_connection_failure(
             sensor_computer_assignment)
         self.computer_actuator_connection_failures, self.ca_conn_list = self.generate_connection_failure(
             computer_actuator_assignment)
 
-
+        # print("Time taken to setup: ", time.time() - curr_time)
         # Compute reliability
+        curr_time = time.time()
         reliability = self.evaluate_reliability(scale=scale)
+        # print("Time taken to evaluate reliability: ", time.time() - curr_time)
 
         # Compute mass
+        curr_time = time.time()
         mass = self.evaluate_mass()
+        # print("Time taken to evaluate mass: ", time.time() - curr_time)
 
         # Always return objectives as they are
         # - flipping values for minimization / maximization is done in the design object
@@ -152,70 +172,110 @@ class GncModel(Model):
     def evaluate_reliability(self, scale=False):
         reliability = 0
 
+        # Print the number of all failure scenarios
+        # print("--------------------- Number of sensor failure scenarios: ", len(self.sensor_failures))
+        # print("- Number of sensor computer connection failure scenarios: ", len(self.sensor_computer_connection_failures))
+        # print("------------------- Number of computer failure scenarios: ", len(self.computer_failures))
+        # print("Number of computer actuator connection failure scenarios: ", len(self.computer_actuator_connection_failures))
+        # print("------------------- Number of actuator failure scenarios: ", len(self.actuator_failures))
+        # print("---------------------- Total number of failure scenarios: ", len(self.sensor_failures) * len(self.sensor_computer_connection_failures) * len(self.computer_failures) * len(self.computer_actuator_connection_failures) * len(self.actuator_failures))
+
+
+
         # Iterate through all possible failure scenarios
         # - This is a combinatorial problem, so we need to iterate through all possible combinations of failures
         valid_configs = 0
-        for sensor_failure in self.sensor_failures:
-            sensor_prob = self.component_failure_prob(self.design_sensors_probs, sensor_failure)
-            # print(sensor_failure, sensor_prob)
+        for sensor_failure in tqdm(self.sensor_failures, desc='Sensor failures'):
+            sensor_prob = self.component_failure_prob(self.sensors, sensor_failure)
 
-            # rebuild full sensor bitlst
-            sensor_bitlst = []
-            count = 0
-            for i in range(len(self.sensors)):
-                if i in self.design_sensors:
-                    if sensor_failure[count] == 1:
-                        sensor_bitlst.append(1)
-                    else:
-                        sensor_bitlst.append(0)
-                    count += 1
-                else:
-                    sensor_bitlst.append(0)
+            if sum(sensor_failure) == 0:
+                continue
 
             for scc_idx, sensor_computer_connection_failure in enumerate(self.sensor_computer_connection_failures):
                 sensor_computer_connection_prob = self.connection_failure_prob(self.sc_conn_list[scc_idx])
-                # print(self.sc_conn_list[scc_idx], sensor_computer_connection_prob)
+
+                # OPTIMIZE HERE
+                sc_conn_copy = deepcopy(sensor_computer_connection_failure)
+                for idx, sc_bit in enumerate(sensor_computer_connection_failure):
+                    if sc_bit == 1:
+                        sensor_idx = idx % len(self.sensors)
+                        sensor_bit = sensor_failure[sensor_idx]
+                        sc_conn_copy[idx] = sensor_bit
+                # # Number of sensors and computers
+                # # Convert to numpy arrays
+                # curr_time = time.time()
+                # sensors = np.array(sensor_failure)
+                # sensor_computer_conn = np.array(sensor_computer_connection_failure).reshape(self.num_sensors, self.num_computers)
+                # # Remove failed sensors from the connections matrix
+                # sensor_computer_conn = sensor_computer_conn * sensors[:, np.newaxis]
+                # # Check if any sensor connects to any computer
+                # result = np.any(sensor_computer_conn)
+                # print("Time taken to trans2: ", time.time() - curr_time)
+                #
+                # exit(0)
+                if sum(sc_conn_copy) == 0:
+                    continue
+
 
                 for computer_failure in self.computer_failures:
-                    computer_prob = self.component_failure_prob(self.design_computers_probs, computer_failure)
+                    computer_prob = self.component_failure_prob(self.computers, computer_failure)
+                    computer_bitlst = computer_failure
 
-                    # rebuild full computer bitlst
-                    computer_bitlst = []
-                    count = 0
-                    for i in range(len(self.computers)):
-                        if i in self.design_computers:
-                            if computer_failure[count] == 1:
-                                computer_bitlst.append(1)
-                            else:
-                                computer_bitlst.append(0)
-                            count += 1
+                    # Iterate over computers and sensors
+                    val_comps = []
+                    for c_idx, c_bit in enumerate(computer_failure):
+                        c_bit = computer_failure[c_idx]
+                        val_comp_bits = []
+                        for s_idx, s_bit in enumerate(sensor_failure):
+                            s_bit = sensor_failure[s_idx]
+                            conn_bit = sc_conn_copy[c_idx * len(self.sensors) + s_idx]
+                            val_bit = c_bit * s_bit * conn_bit
+                            val_comp_bits.append(val_bit)
+                        if sum(val_comp_bits) > 0:
+                            val_comps.append(1)
                         else:
-                            computer_bitlst.append(0)
+                            val_comps.append(0)
+                    if sum(val_comps) == 0:
+                        continue
+
 
                     for cac_idx, computer_actuator_connection_failure in enumerate(self.computer_actuator_connection_failures):
                         computer_actuator_connection_prob = self.connection_failure_prob(self.ca_conn_list[cac_idx])
 
+                        # Eval if system is still online
+                        ca_conn_copy = deepcopy(computer_actuator_connection_failure)
+                        for idx, ca_bit in enumerate(computer_actuator_connection_failure):
+                            if ca_bit == 1:
+                                computer_idx = idx % len(self.computers)
+                                computer_bit = computer_failure[computer_idx]
+                                ca_conn_copy[idx] = computer_bit
+                        if sum(ca_conn_copy) == 0:
+                            continue
+
                         for actuator_failure in self.actuator_failures:
-                            actuator_prob = self.component_failure_prob(self.design_actuators_probs, actuator_failure)
+                            actuator_prob = self.component_failure_prob(self.actuators, actuator_failure)
+                            # actuator_bitlst = actuator_failure
+                            # system_status = self.eval_system(sensor_bitlst, sensor_computer_connection_failure, computer_bitlst, computer_actuator_connection_failure, actuator_bitlst)
 
-                            # rebuild full actuator bitlst
-                            actuator_bitlst = []
-                            count = 0
-                            for i in range(len(self.actuators)):
-                                if i in self.design_actuators:
-                                    if actuator_failure[count] == 1:
-                                        actuator_bitlst.append(1)
-                                    else:
-                                        actuator_bitlst.append(0)
-                                    count += 1
+                            # Eval if system is still online
+                            idx = 0
+                            val_actuators = []
+                            for a_idx, a_bit in enumerate(actuator_failure):
+                                a_bit = actuator_failure[a_idx]
+                                val_actuator_bits = []
+                                for c_idx, c_bit in enumerate(computer_failure):
+                                    c_bit = computer_failure[c_idx]
+                                    conn_bit = computer_actuator_connection_failure[idx]
+                                    val_bit = a_bit * c_bit * conn_bit
+                                    val_actuator_bits.append(val_bit)
+                                if sum(val_actuator_bits) > 0:
+                                    val_actuators.append(1)
                                 else:
-                                    actuator_bitlst.append(0)
-
-                            system_status = self.eval_system(sensor_bitlst, sensor_computer_connection_failure, computer_bitlst, computer_actuator_connection_failure, actuator_bitlst)
-
-                            if system_status is True:
+                                    val_actuators.append(0)
+                            if sum(val_actuators) != 0:
                                 valid_configs += 1
                                 reliability += (sensor_prob * sensor_computer_connection_prob * computer_prob * computer_actuator_connection_prob * actuator_prob)
+
 
 
         # print("Reliability: ", reliability)
@@ -227,20 +287,7 @@ class GncModel(Model):
             result = reliability
         return result
 
-    def generate_active_component_failures(self, components):
-        # Components is a binary list denoting which components are active
-        idx_active = [i for i, bit in enumerate(components) if bit == 1]
-        active_failures = self.generate_component_failures(idx_active)
-
-        all_full_failures = []
-        for active_failure in active_failures:
-            full_failure = [0 for i in range(len(components))]
-            for i, idx in enumerate(idx_active):
-                full_failure[idx] = active_failure[i]
-            all_full_failures.append(full_failure)
-        return all_full_failures
-
-    def generate_component_failures(self, component):
+    def generate_component_failures(self, component, all_components):
         """
         Generate all possible binary strings of length n, where n is the number of components in the system.
 
@@ -248,13 +295,19 @@ class GncModel(Model):
         This way, a static representation can be used when evaluating reliability
 
 
-        :param component: An array list of doubles
+        :param component: array of indices of active components
         :return: List of binary strings representing component failures.
         """
         n = len(component)
-        binary_strings = enumerate_binary_strings(n)
-        binary_lists = [[int(bit) for bit in binary_string] for binary_string in binary_strings]
-        return binary_lists
+        failure_options = enumerate_binary_strings(n)
+        failure_options = [[int(bit) for bit in binary_string] for binary_string in failure_options]
+        failures = []
+        for idx, bs in enumerate(failure_options):
+            fragment = [0] * len(all_components)
+            for i, c in enumerate(component):
+                fragment[c] = bs[i]
+            failures.append(fragment)
+        return failures
 
     def generate_connection_failure(self, bitstr):
         bitlist = [int(bit) for bit in bitstr]
@@ -374,12 +427,14 @@ if __name__ == '__main__':
 
 
     ### Evaluate objectives
-    sensor_computer_assignment = '101001'
-    computer_actuator_assignment = '110101'
+    sensor_computer_assignment = '111111111'
+    computer_actuator_assignment = '111111111'
     design = sensor_computer_assignment + computer_actuator_assignment
     design = [int(bit) for bit in design]
-    objectives = gnc_model.evaluate(design)
+    curr_time = time.time()
+    objectives = gnc_model.evaluate(design, normalize=True)
     print("Reliability / Mass: ", objectives)
+    print("Total Time taken: ", time.time() - curr_time)
 
 
 

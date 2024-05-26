@@ -5,8 +5,8 @@ problem1 = {
         'weights': [0.2, 0.3, 0.5]
     },
     'computers': {
-        'reliabilities': [0.999, 0.995],
-        'weights': [0.4, 0.6]
+        'reliabilities': [0.999, 0.995, 0.990],
+        'weights': [0.4, 0.6, 0.1]
     },
     'actuators': {
         'reliabilities': [0.990, 0.995, 0.9999],

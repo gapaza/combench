@@ -58,7 +58,7 @@ class Population(ABC):
             design = self.unique_designs[idx]
             objs = design.evaluate()
 
-        return objs
+        return design
 
     def eval_population(self):
         objectives = []

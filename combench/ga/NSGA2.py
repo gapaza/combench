@@ -94,6 +94,7 @@ class NSGA2:
             self.population.record()
             update_delta = self.population.nfe - curr_nfe
             progress_bar.update(update_delta)
+            progress_bar.set_postfix({'hv': self.population.hv[-1]})
 
         # Plot hv and population
         self.population.plot_population(self.save_dir)

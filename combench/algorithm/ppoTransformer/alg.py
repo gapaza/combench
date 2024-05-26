@@ -21,7 +21,7 @@ global_mini_batch_size = num_weight_samples * repeat_size
 task_epochs = 800
 clip_ratio = 0.2
 target_kl = 0.005
-entropy_coef = 0.02
+entropy_coef = 0.04
 
 perf_term_weight = 1.0
 constraint_term_weight = 0.05
@@ -33,10 +33,16 @@ tf.random.set_seed(seed_num)
 
 
 # Importing the problem / design / population
-from combench.models.assigning import problem1 as problem
-from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
-from combench.models.assigning.nsga2 import AssigningPop as Population
-from combench.models.assigning.nsga2 import AssigningDesign as Design
+# from combench.models.assigning import problem1 as problem
+# from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
+# from combench.models.assigning.nsga2 import AssigningPop as Population
+# from combench.models.assigning.nsga2 import AssigningDesign as Design
+# from combench.ga.NSGA2 import BenchNSGA2
+
+from combench.models.knapsack2 import problem1 as problem
+from combench.models.knapsack2.Knapsack2 import Knapsack2 as Model
+from combench.models.knapsack2.nsga2 import KPPopulation as Population
+from combench.models.knapsack2.nsga2 import KPDesign as Design
 from combench.ga.NSGA2 import BenchNSGA2
 
 
@@ -277,15 +283,19 @@ class UnconstrainedPPO(Algorithm):
 
         design_bitlst = [int(bit) for bit in design_bitstr]
         design = Design(design_bitlst, self.problem)
-        objs = self.population.add_design(design)
+        design = self.population.add_design(design)
+        objs = design.evaluate()
 
         w1 = weight
         w2 = 1.0 - weight
 
         # Calculate reward
         term1 = abs(objs[0]) * w1
-        term2 = (1 - objs[1]) * w2
+        term2 = abs(objs[1]) * w2
         reward = term1 + term2
+
+        if design.is_feasible is False:
+            reward = design.feasibility_score * -0.01
 
         return reward, objs
 
@@ -440,12 +450,12 @@ if __name__ == '__main__':
 
     # Population
     pop_size = 50
-    ref_point = np.array([0, 1])
+    ref_point = np.array([0, 0])
     pop = Population(pop_size, ref_point, problem)
 
     # PPO
     max_nfe = 1000
-    ppo = UnconstrainedPPO(problem, pop, max_nfe, run_name='ppo')
+    ppo = UnconstrainedPPO(problem, pop, max_nfe, run_name='ppo-knapsack2')
     ppo.run()
 
 

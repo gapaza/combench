@@ -31,7 +31,10 @@ class GncDesign(Design):
             return self.objectives
         reliability, mass = self.problem.evaluate(self.vector)
         self.objectives = [reliability, mass]
-        self.is_feasible = True  # Assume all overweight designs are feasible for now
+        if reliability == 0.0:
+            self.is_feasible = False
+        else:
+            self.is_feasible = True
         return self.objectives
 
     def get_plotting_objectives(self):
@@ -49,27 +52,27 @@ class GncPopulation(UnconstrainedPop):
         return design
 
 
-    def eval_population(self):
-
-        # Evaluate unknown designs
-        unkonwn_designs = [design for design in self.designs if not design.is_evaluated()]
-        unknown_designs_vectors = [design.vector for design in unkonwn_designs]
-        unknown_designs_objectives = self.problem.evaluate_batch(unknown_designs_vectors, normalize=True)
-        for design, objs in zip(unkonwn_designs, unknown_designs_objectives):
-            design.objectives = objs
-            design.is_feasible = True
-
-        # Collect objectives
-        objectives = []
-        for design in self.designs:
-            objs = design.evaluate()
-            design_str = design.get_design_str()
-            if design_str not in self.unique_designs_bitstr:
-                self.unique_designs_bitstr.add(design_str)
-                self.unique_designs.append(deepcopy(design))
-                self.nfe += 1
-            objectives.append(objs)
-        return objectives
+    # def eval_population(self):
+    #
+    #     # Evaluate unknown designs
+    #     unkonwn_designs = [design for design in self.designs if not design.is_evaluated()]
+    #     unknown_designs_vectors = [design.vector for design in unkonwn_designs]
+    #     unknown_designs_objectives = self.problem.evaluate_batch(unknown_designs_vectors, normalize=True)
+    #     for design, objs in zip(unkonwn_designs, unknown_designs_objectives):
+    #         design.objectives = objs
+    #         design.is_feasible = True
+    #
+    #     # Collect objectives
+    #     objectives = []
+    #     for design in self.designs:
+    #         objs = design.evaluate()
+    #         design_str = design.get_design_str()
+    #         if design_str not in self.unique_designs_bitstr:
+    #             self.unique_designs_bitstr.add(design_str)
+    #             self.unique_designs.append(deepcopy(design))
+    #             self.nfe += 1
+    #         objectives.append(objs)
+    #     return objectives
 
 
 
@@ -85,7 +88,7 @@ if __name__ == '__main__':
     pop = GncPopulation(pop_size, ref_point, problem)
 
     # NSGA2
-    max_nfe = 1000
+    max_nfe = 200
     nsga2 = NSGA2(pop, problem, max_nfe, run_name='gnc')
     nsga2.run()
 
