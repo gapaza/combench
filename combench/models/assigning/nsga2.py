@@ -66,7 +66,7 @@ if __name__ == '__main__':
 
     # NSGA2
     max_nfe = 1000
-    nsga2 = NSGA2(pop, problem, max_nfe, run_name='assigning_unconstrained')
+    nsga2 = NSGA2(pop, problem, max_nfe, run_name='assigning-unconstrained')
     nsga2.run()
 
 

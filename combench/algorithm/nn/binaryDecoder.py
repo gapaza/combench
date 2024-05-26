@@ -193,7 +193,6 @@ class BinaryDecoderCritic(tf.keras.Model):
     def from_config(cls, config):
         return cls(**config)
 
-
 # ------------------------------------
 # Get
 # ------------------------------------

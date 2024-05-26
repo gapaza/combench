@@ -1,50 +1,49 @@
 from copy import deepcopy
 import matplotlib.gridspec as gridspec
 import numpy as np
-import scipy.signal
 import os
 import tensorflow as tf
-import random
 from combench.core.algorithm import Algorithm
-from combench.algorithm.ppoTransformer.binaryDecoder import get_models
+from combench.algorithm.nn.binaryDecoder import get_models
+from combench.algorithm import discounted_cumulative_sums
+import random
 
-def discounted_cumulative_sums(x, discount):
-    # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
-    return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
+# ------- Run name
+save_name = 'binary-search'
 
-# Sampling parameters
+# ------- Sampling parameters
 num_weight_samples = 4  # 4
 repeat_size = 1  # 3
 global_mini_batch_size = num_weight_samples * repeat_size
 
-# Training Parameters
+# -------- Training Parameters
 task_epochs = 800
+max_nfe = 1000
 clip_ratio = 0.2
 target_kl = 0.005
-entropy_coef = 0.04
+entropy_coef = 0.02
 
-perf_term_weight = 1.0
-constraint_term_weight = 0.05
+# -------- Problem
+opt_dir = ['max', 'min']
+use_constraints = False
+from combench.models.assigning import problem1 as problem
+from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
+from combench.models.assigning.nsga2 import AssigningPop as Population
+from combench.models.assigning.nsga2 import AssigningDesign as Design
+from combench.ga.NSGA2 import BenchNSGA2
 
-# Set random seed
+# opt_dir = ['max', 'max']
+# use_constraints = False
+# from combench.models.knapsack2 import problem1 as problem
+# from combench.models.knapsack2.Knapsack2 import Knapsack2 as Model
+# from combench.models.knapsack2.nsga2 import KPPopulation as Population
+# from combench.models.knapsack2.nsga2 import KPDesign as Design
+# from combench.ga.NSGA2 import BenchNSGA2
+
+# -------- Set random seed
 seed_num = 1
 random.seed(seed_num)
 tf.random.set_seed(seed_num)
-
-
-# Importing the problem / design / population
-# from combench.models.assigning import problem1 as problem
-# from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
-# from combench.models.assigning.nsga2 import AssigningPop as Population
-# from combench.models.assigning.nsga2 import AssigningDesign as Design
-# from combench.ga.NSGA2 import BenchNSGA2
-
-from combench.models.knapsack2 import problem1 as problem
-from combench.models.knapsack2.Knapsack2 import Knapsack2 as Model
-from combench.models.knapsack2.nsga2 import KPPopulation as Population
-from combench.models.knapsack2.nsga2 import KPDesign as Design
-from combench.ga.NSGA2 import BenchNSGA2
-
 
 class UnconstrainedPPO(Algorithm):
 
@@ -56,8 +55,6 @@ class UnconstrainedPPO(Algorithm):
         self.unique_designs_bitstr = set()
         self.actor_path = actor_path
         self.critic_path = critic_path
-        self.hv = []
-        self.nfes = []
 
         # Objective Weights
         num_keys = 9
@@ -84,7 +81,6 @@ class UnconstrainedPPO(Algorithm):
         self.clip_ratio = clip_ratio
         self.target_kl = target_kl
         self.entropy_coef = entropy_coef
-        self.perf_term_weight = perf_term_weight
         self.mini_batch_size = global_mini_batch_size
         self.decision_start_token_id = 1
         self.num_actions = 2
@@ -104,7 +100,7 @@ class UnconstrainedPPO(Algorithm):
         print('Running PPO')
 
         self.curr_epoch = 0
-        while self.nfe < self.max_nfe:
+        while self.population.nfe < self.max_nfe:
             self.run_epoch()
             self.record()
             self.curr_epoch += 1
@@ -286,15 +282,26 @@ class UnconstrainedPPO(Algorithm):
         design = self.population.add_design(design)
         objs = design.evaluate()
 
+        # Find weights
         w1 = weight
         w2 = 1.0 - weight
 
-        # Calculate reward
-        term1 = abs(objs[0]) * w1
-        term2 = abs(objs[1]) * w2
+        # Calculate terms
+        if opt_dir[0] == 'max':
+            term1 = abs(objs[0]) * w1
+        else:
+            term1 = (1 - objs[0]) * w1
+
+        if opt_dir[1] == 'max':
+            term2 = abs(objs[1]) * w2
+        else:
+            term2 = (1 - objs[1]) * w2
+
+        # Reward
         reward = term1 + term2
 
-        if design.is_feasible is False:
+        # Implement constraints if necessary
+        if use_constraints is True and design.is_feasible is False:
             reward = design.feasibility_score * -0.01
 
         return reward, objs
@@ -450,12 +457,11 @@ if __name__ == '__main__':
 
     # Population
     pop_size = 50
-    ref_point = np.array([0, 0])
+    ref_point = np.array([0, 1])
     pop = Population(pop_size, ref_point, problem)
 
     # PPO
-    max_nfe = 1000
-    ppo = UnconstrainedPPO(problem, pop, max_nfe, run_name='ppo-knapsack2')
+    ppo = UnconstrainedPPO(problem, pop, max_nfe, run_name=save_name)
     ppo.run()
 
 

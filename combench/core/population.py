@@ -36,28 +36,20 @@ class Population(ABC):
             design = self.create_design()
             self.designs.append(design)
 
-    def add_designs(self, designs):
-        self.designs.extend(designs)
-        # for design in designs:
-        #     design_str = design.get_design_str()
-        #     if design_str not in self.unique_designs_bitstr:
-        #         self.unique_designs_bitstr.add(design_str)
-        #         self.unique_designs.append(deepcopy(design))
-        #         self.nfe += 1
-
     def add_design(self, design):
         design_str = design.get_design_str()
         if design_str not in self.unique_designs_bitstr:
             self.unique_designs_bitstr.add(design_str)
-            objs = design.evaluate()
-            self.unique_designs.append(deepcopy(design))
+            design.evaluate()
+            copied_design = deepcopy(design)
+            self.unique_designs.append(copied_design)
+            self.designs.append(copied_design)
             self.nfe += 1
         else:
             bitstrs = [d.get_design_str() for d in self.unique_designs]
             idx = bitstrs.index(design_str)
             design = self.unique_designs[idx]
-            objs = design.evaluate()
-
+            design.evaluate()
         return design
 
     def eval_population(self):
