@@ -59,7 +59,7 @@ class AssigningPop(UnconstrainedPop):
 
 
 
-from combench.models.assigning import problem2 as pf
+from combench.models.assigning import problem1 as pf
 from combench.ga.NSGA2 import NSGA2
 from combench.models.assigning.GeneralizedAssigning import GeneralAssigning
 
@@ -70,13 +70,13 @@ if __name__ == '__main__':
     problem = GeneralAssigning(pf)
 
     # Population
-    pop_size = 200
+    pop_size = 100
     ref_point = np.array([0, 1])
     pop = AssigningPop(pop_size, ref_point, problem)
 
     # NSGA2
     max_nfe = 200000
-    nsga2 = NSGA2(pop, problem, max_nfe, run_name='assigning-unconstrained-large')
+    nsga2 = NSGA2(pop, problem, max_nfe, run_name='assigning-unconstrained')
     nsga2.run()
 
 

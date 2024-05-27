@@ -35,12 +35,12 @@ update_target_network_freq = 5
 replay_buffer_size = 10000
 epsilon = 0.99  # was 0.99
 epsilon_end = 0.01
-decay_steps = 100 * 100  # config.num_vars
+decay_steps = 100 * config.num_vars
 
 # -------- Problem
 opt_dir = ['max', 'min']  # 0.638 HV GA 10k, 0.64496 HV DQN 10k
 use_constraints = False
-from combench.models.assigning import problem2 as problem
+from combench.models.assigning import problem1 as problem
 from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
 from combench.models.assigning.nsga2 import AssigningPop as Population
 from combench.models.assigning.nsga2 import AssigningDesign as Design
@@ -424,8 +424,8 @@ if __name__ == '__main__':
     problem = Model(problem)
 
     # Population
-    pop_size = 300
-    ref_point = np.array([0, 1])
+    pop_size = 200
+    ref_point = np.array([0, 1])  # GA .646
     pop = Population(pop_size, ref_point, problem)
 
     # PPO
