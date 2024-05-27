@@ -79,6 +79,6 @@ if __name__ == '__main__':
     print('Running RunnerNSGA2')
     runner = BenchNSGA2(problem, max_nfe, run_name='knapsack-study')
     # runner.run(pop_batch)
-    runner.plot_results()
+    # runner.plot_results()
 
 

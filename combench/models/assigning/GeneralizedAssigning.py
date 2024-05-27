@@ -2,6 +2,7 @@ import numpy as np
 import math
 from combench.core.model import Model
 from combench.models.utils import random_binary_design
+import time
 
 class GeneralAssigning(Model):
 
@@ -20,6 +21,8 @@ class GeneralAssigning(Model):
     def load_norms(self):
         if 'norms' in self.problem_store:
             return self.problem_store['norms']
+        print('Calculating new norms\n\n\n')
+        time.sleep(2)
 
         # Calculate the norms
         random_designs = [self.random_design() for _ in range(10000)]

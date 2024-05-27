@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import json
 import numpy as np
 import pandas as pd
+import seaborn as sns
 
 class BenchNSGA2:
 
@@ -33,17 +34,53 @@ class BenchNSGA2:
     def plot_results(self, comparison=None):
         results = self.load_results()
         dfs = []
+
+        max_hvs = []
+        max_nfes = []
+        min_nfes = []
         for alg_run in results:
             nfe, hv = zip(*alg_run)
             min_nfe, max_nfe = min(nfe), max(nfe)
-            nfe_space = np.linspace(min_nfe, max_nfe, len(hv))
-            hv_interp = np.linspace(nfe_space, nfe, hv)
+            max_nfes.append(max_nfe)
+            min_nfes.append(min_nfe)
+            max_hvs.append(max(hv))
+        max_nfe = min(max_nfes)
+        min_nfe = max(min_nfes)
+
+
+        for alg_run in results:
+            nfe, hv = zip(*alg_run)
+            # min_nfe, max_nfe = min(nfe), max(nfe)
+            nfe_space = np.linspace(min_nfe, max_nfe, max_nfe - min_nfe)
+            hv_interp = np.interp(nfe_space, nfe, hv)
             df = pd.DataFrame({'nfe': nfe_space, 'hv': hv_interp, 'label': self.nsga2_name})
             dfs.append(df)
 
+        # Combine dataframes
+        df = pd.concat(dfs, ignore_index=True)
+        df[['nfe', 'hv']] = df[['nfe', 'hv']].apply(pd.to_numeric)
+        data_frames = df
+
+        # Plot
+        plt.clf()
+        sns.set(style="darkgrid")
+        plt.figure(figsize=(8, 5))
+        # sns.lineplot(x='nfe', y='hv', hue='label', data=data_frames, ci='sd', estimator='mean')
+        sns.lineplot(x='nfe', y='hv', hue='label', data=data_frames, ci='sd', estimator='mean', linewidth=2.5)
+        plt.title('NSGA2 Results', fontsize=20)
+        plt.xlabel('NFE', fontsize=16)
+        plt.ylabel('Hypervolume', fontsize=16)
+        plt.xticks(fontsize=14)  # Larger x-axis tick labels
+        plt.yticks(fontsize=14)  # Larger y-axis tick labels
+        plt.legend(fontsize=14, loc='lower right')
+        save_path = os.path.join(self.save_dir, 'nsga2_results.png')
+        plt.savefig(save_path)
+        plt.show()
+
+        print('Average final HV:', np.mean(max_hvs))
 
 
-        pass
+
 
     def run(self, populations):
         results = []

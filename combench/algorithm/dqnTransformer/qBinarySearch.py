@@ -38,7 +38,7 @@ epsilon_end = 0.01
 decay_steps = 100 * config.num_vars
 
 # -------- Problem
-opt_dir = ['max', 'min']  # 0.638 HV GA 10k, 0.64496 HV DQN 10k
+opt_dir = ['max', 'min']
 use_constraints = False
 from combench.models.assigning import problem1 as problem
 from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model

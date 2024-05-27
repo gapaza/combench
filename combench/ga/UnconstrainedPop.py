@@ -46,7 +46,6 @@ class UnconstrainedPop(Population):
         for idx in survivors:
             new_population.append(self.designs[idx])
         if len(new_population) > self.pop_size:
-            # Sort new population by crowding distance
             new_population.sort(key=lambda x: x.crowding_distance, reverse=True)
             new_population = new_population[:self.pop_size]
 
@@ -58,7 +57,6 @@ class UnconstrainedPop(Population):
         objectives = self.eval_population()
         F = np.array(objectives)
         fronts = self.nds.do(F, n_stop_if_ranked=self.pop_size)
-        # print('Objectives:', objectives)
         for k, front in enumerate(fronts, start=1):
             crowding_of_front = ga_utils.calc_crowding_distance(F[front, :])
             for i, idx in enumerate(front):
@@ -83,7 +81,7 @@ class UnconstrainedPop(Population):
             parent1 = pair[0]
             parent2 = pair[1]
             child = self.create_design()
-            # child.crossover(parent1, parent2)
+            child.crossover(parent1, parent2)
             child.mutate()
             offspring.append(child)
         self.designs.extend(offspring)

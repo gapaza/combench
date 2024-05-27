@@ -60,7 +60,7 @@ class AssigningPop(UnconstrainedPop):
 
 
 from combench.models.assigning import problem1 as pf
-from combench.ga.NSGA2 import NSGA2
+from combench.ga.NSGA2 import NSGA2, BenchNSGA2
 from combench.models.assigning.GeneralizedAssigning import GeneralAssigning
 
 
@@ -70,14 +70,29 @@ if __name__ == '__main__':
     problem = GeneralAssigning(pf)
 
     # Population
-    pop_size = 100
-    ref_point = np.array([0, 1])
-    pop = AssigningPop(pop_size, ref_point, problem)
+    # pop_size = 100
+    # ref_point = np.array([0, 1])
+    # pop = AssigningPop(pop_size, ref_point, problem)
 
     # NSGA2
-    max_nfe = 200000
-    nsga2 = NSGA2(pop, problem, max_nfe, run_name='assigning-unconstrained')
-    nsga2.run()
+    # max_nfe = 200000
+    # nsga2 = NSGA2(pop, problem, max_nfe, run_name='assigning-unconstrained')
+    # nsga2.run()
+
+    # Populations
+    ref_point = np.array([0, 1])
+    pop_size = 100
+    pop_batch = []
+    for x in range(20):
+        pop = AssigningPop(pop_size, ref_point, problem)
+        pop_batch.append(pop)
+
+    # RunnerNSGA2
+    max_nfe = 5000
+    print('Running RunnerNSGA2')
+    runner = BenchNSGA2(problem, max_nfe, run_name='assigning-bench-nsga2')
+    runner.run(pop_batch)
+    runner.plot_results()
 
 
 
