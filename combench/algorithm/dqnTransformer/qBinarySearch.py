@@ -15,12 +15,12 @@ from combench.algorithm.nn.qDecoder import get_models
 from combench.core.algorithm import Algorithm
 
 # ------- Run name
-save_name = 'q-binary-search4'
-max_nfe = 1000
+save_name = 'q-binary-search-assigning-large-2'
+max_nfe = 30000
 plot_freq = 50
 
 # ------- Sampling parameters
-num_weight_samples = 9  # 4
+num_weight_samples = 18  # 4
 repeat_size = 1  # 3
 global_mini_batch_size = num_weight_samples * repeat_size
 
@@ -35,12 +35,12 @@ update_target_network_freq = 5
 replay_buffer_size = 10000
 epsilon = 0.99  # was 0.99
 epsilon_end = 0.01
-decay_steps = 100 * config.num_vars
+decay_steps = 100 * 100  # config.num_vars
 
 # -------- Problem
-opt_dir = ['max', 'min']
+opt_dir = ['max', 'min']  # 0.638 HV GA 10k, 0.64496 HV DQN 10k
 use_constraints = False
-from combench.models.assigning import problem1 as problem
+from combench.models.assigning import problem2 as problem
 from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
 from combench.models.assigning.nsga2 import AssigningPop as Population
 from combench.models.assigning.nsga2 import AssigningDesign as Design
@@ -424,7 +424,7 @@ if __name__ == '__main__':
     problem = Model(problem)
 
     # Population
-    pop_size = 50
+    pop_size = 300
     ref_point = np.array([0, 1])
     pop = Population(pop_size, ref_point, problem)
 

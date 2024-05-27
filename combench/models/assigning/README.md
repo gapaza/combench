@@ -3,7 +3,8 @@
 
 ## Overview
 
-The GeneralAssigning class is a Python implementation of a general assignment problem. This problem involves assigning a set of tasks to a set of agents in a way that maximizes total profit while adhering to budget constraints. Each task-agent pair has an associated cost and profit, and the goal is to find an optimal assignment that balances these objectives and doesn't exceed any agent's budget.
+The GeneralAssigning class is an implementation of a general assignment problem. 
+This problem involves assigning a set of tasks to a set of agents in a way that maximizes total profit while adhering to budget constraints. Each task-agent pair has an associated cost and profit, and the goal is to find an optimal assignment that balances these objectives and doesn't exceed any agent's budget.
 
 
 ## Problem Description

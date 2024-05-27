@@ -47,9 +47,19 @@ class AssigningPop(UnconstrainedPop):
         design = AssigningDesign(vector, self.problem)
         return design
 
+    def calc_hv(self):
+        objectives = self.eval_population()
+        # objectives = [design.objectives for design in self.unique_designs]
+        if len(objectives) == 0:
+            return 0.0
+        F = np.array(objectives)
+        hv = self.hv_client.do(F)
+        # print(hv, objectives)
+        return hv
 
 
-from combench.models.assigning import problem1
+
+from combench.models.assigning import problem2 as pf
 from combench.ga.NSGA2 import NSGA2
 from combench.models.assigning.GeneralizedAssigning import GeneralAssigning
 
@@ -57,16 +67,16 @@ from combench.models.assigning.GeneralizedAssigning import GeneralAssigning
 if __name__ == '__main__':
 
     # Problem
-    problem = GeneralAssigning(problem1)
+    problem = GeneralAssigning(pf)
 
     # Population
-    pop_size = 30
+    pop_size = 200
     ref_point = np.array([0, 1])
     pop = AssigningPop(pop_size, ref_point, problem)
 
     # NSGA2
-    max_nfe = 1000
-    nsga2 = NSGA2(pop, problem, max_nfe, run_name='assigning-unconstrained')
+    max_nfe = 200000
+    nsga2 = NSGA2(pop, problem, max_nfe, run_name='assigning-unconstrained-large')
     nsga2.run()
 
 

@@ -34,7 +34,7 @@ class QDecoder(tf.keras.Model):
         # Variables
         self.vocab_size = 4
         self.vocab_output_size = 2
-        self.gen_design_seq_length = config.num_vars
+        self.gen_design_seq_length = 100  # config.num_vars
         self.embed_dim = actor_embed_dim
         self.num_heads = actor_heads
         self.dense_dim = actor_dense

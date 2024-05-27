@@ -77,6 +77,7 @@ class NSGA2:
         self.population.init_population()
         self.population.eval_population()
         self.population.prune()
+        # self.population.record()
 
         progress_bar = tqdm(total=self.max_nfe)
         curr_nfe = 0
@@ -91,6 +92,8 @@ class NSGA2:
             self.population.prune()
 
             # Log iteration
+            # if curr_nfe % 10 == 0:
+            #     self.population.record()
             self.population.record()
             update_delta = self.population.nfe - curr_nfe
             progress_bar.update(update_delta)
