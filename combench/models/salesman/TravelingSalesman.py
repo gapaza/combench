@@ -18,7 +18,7 @@ class TravelingSalesman(Model):
 
         self.num_cities = len(self.cities)
         self.norms = self.load_norms()
-        print('Norm values: {}'.format(self.norms))
+        # print('Norm values: {}'.format(self.norms))
 
     def normalize_coords(self, coords):
         cities_x = [city[0] for city in coords]
@@ -39,11 +39,12 @@ class TravelingSalesman(Model):
 
 
     def load_norms(self):
+        self.problem_store['norms'] = [10.0, 10.0]
         if 'norms' in self.problem_store:
             return self.problem_store['norms']
 
         # Calculate the norms
-        random_designs = [self.random_design() for _ in range(10000)]
+        random_designs = [self.random_design() for _ in range(1000)]
         evals = []
         for design in random_designs:
             objs = self.evaluate(design, normalize=False)
@@ -77,19 +78,11 @@ class TravelingSalesman(Model):
         return True
 
     def evaluate(self, design, normalize=True):
-        # if self.is_valid(design) is False:
-        #     if normalize is True:
-        #         return 1.0, 1.0, False
-        #     return 1e10, 1e10, False
         total_distance, total_cost = self._evaluate(design)
         if normalize is True:
-            if total_distance == 1e10:
-                total_cost = 1.0
-                total_distance = 1.0
-            else:
-                distance_norm, cost_norm = self.norms
-                total_distance /= distance_norm
-                total_cost /= cost_norm
+            distance_norm, cost_norm = self.norms
+            total_distance /= distance_norm
+            total_cost /= cost_norm
         return total_distance, total_cost, True
 
     def _evaluate(self, design_copy):

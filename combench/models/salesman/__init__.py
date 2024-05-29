@@ -32,8 +32,8 @@ def generate_problem_set(num_problems, num_cities):
             'costs': [(random.uniform(0, 100), random.uniform(0, 100)) for _ in range(num_cities)]
         }
         problems.append(problem)
-    with open(mt_tsp_path, 'w') as f:
-        json.dump(problems, f, indent=4)
+    # with open(mt_tsp_path, 'w') as f:
+    #     json.dump(problems, f, indent=4)
     return problems
 
 def load_problem_set():
@@ -113,7 +113,7 @@ if __name__ == '__main__':
    #          2
    #      ]
    # )
-    generate_problem_set(100, 9)
+    generate_problem_set(10000, 9)
 
 
 

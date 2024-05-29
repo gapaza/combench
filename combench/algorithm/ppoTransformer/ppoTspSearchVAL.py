@@ -3,6 +3,7 @@ import matplotlib.gridspec as gridspec
 import numpy as np
 import os
 import tensorflow as tf
+import time
 
 import config
 from combench.core.algorithm import MultiTaskAlgorithm
@@ -11,12 +12,13 @@ from combench.algorithm import discounted_cumulative_sums
 import random
 
 # ------- Run name
-save_name = 'tsp-search-problem2-r2'
+save_name = 'tsp-search-problem2-val'
+load_name = 'tsp-search-problem2'
 metrics_num = 0
 
 # ------- Sampling parameters
-num_problem_samples = 32  # 1
-repeat_size = 4  # 3
+num_problem_samples = 1  # 1
+repeat_size = 8  # 3
 global_mini_batch_size = num_problem_samples * repeat_size  # 12
 
 # -------- Training Parameters
@@ -45,6 +47,7 @@ class TspPPO(MultiTaskAlgorithm):
 
     def __init__(self, problems, populations, max_nfe, actor_path=None, critic_path=None, run_name='ppo'):
         super().__init__(problems, populations, run_name, max_nfe)
+        self.val_run = True
         self.designs = []
         self.nfe = 0
         self.unique_designs = []
@@ -97,27 +100,21 @@ class TspPPO(MultiTaskAlgorithm):
 
         self.curr_epoch = 0
         while self.get_total_nfe() < self.max_nfe:
+            curr_time = time.time()
             self.run_epoch()
+            # print('Time for epoch:', time.time() - curr_time)
+            curr_time = time.time()
             self.record()
+            # print('Time for record:', time.time() - curr_time)
+            curr_time = time.time()
             self.curr_epoch += 1
-
-            # Only relevant for single-task learning
-            if self.curr_epoch % 25 == 0:
+            if self.curr_epoch % 10 == 0:
                 self.populations[-1].plot_hv(self.save_dir)
                 self.populations[-1].plot_population(self.save_dir)
                 self.plot_metrics(['return', 'c_loss', 'kl', 'entropy', 'avg_dist'], sn=metrics_num)
-
-            if self.curr_epoch % 200 == 0:
-                t_actor_save_path = os.path.join(self.pretrain_save_dir, 'actor_weights_' + str(self.curr_epoch))
-                t_critic_save_path = os.path.join(self.pretrain_save_dir, 'critic_weights_' + str(self.curr_epoch))
-                self.actor.save_weights(t_actor_save_path)
-                self.critic.save_weights(t_critic_save_path)
+                # print('Time for plotting:', time.time() - curr_time)
 
     def get_cond_vars(self):
-        rnd_problems = generate_problem_set(num_problem_samples, num_cities)
-        self.problems = [Model(problem) for problem in rnd_problems]
-        self.populations = [Population(50, np.array([1, 1]), problem) for problem in self.problems]
-
         problem_indices = list(range(len(self.problems)))
         problem_samples_idx = random.sample(problem_indices, num_problem_samples)
         problem_samples = [self.problems[idx] for idx in problem_samples_idx]
@@ -141,6 +138,8 @@ class TspPPO(MultiTaskAlgorithm):
         return cond_vars_tensor, problem_samples_all, population_samples_all, problem_indices_all
 
     def run_epoch(self):
+        curr_time = time.time()
+
         new_designs = []
 
         all_total_rewards = []
@@ -205,7 +204,7 @@ class TspPPO(MultiTaskAlgorithm):
             else:
                 observation = observation_new
 
-
+        # print('Time sample actor:', time.time() - curr_time)
         # if len(all_dists) > 0:
         #     print('Average distance:', np.mean(all_dists))
         # else:
@@ -214,6 +213,8 @@ class TspPPO(MultiTaskAlgorithm):
         # -------------------------------------
         # Sample Critic
         # -------------------------------------
+        curr_time = time.time()
+
 
         # --- SINGLE CRITIC PREDICTION --- #
         value_t = self.sample_critic(critic_observation_buffer, cond_vars_tensor)
@@ -222,6 +223,7 @@ class TspPPO(MultiTaskAlgorithm):
             last_reward = value[-1]
             all_rewards[idx].append(last_reward)
 
+        # print('Time sample critic:', time.time() - curr_time)
         # -------------------------------------
         # Calculate Advantage and Return
         # -------------------------------------
@@ -260,6 +262,7 @@ class TspPPO(MultiTaskAlgorithm):
         # -------------------------------------
         # Train Actor
         # -------------------------------------
+        curr_time = time.time()
 
         policy_update_itr = 0
         for i in range(self.train_actor_iterations):
@@ -279,9 +282,11 @@ class TspPPO(MultiTaskAlgorithm):
         policy_loss = policy_loss.numpy()
         actor_loss = actor_loss.numpy()
 
+        # print('Time train actor:', time.time() - curr_time)
         # -------------------------------------
         # Train Critic
         # -------------------------------------
+        curr_time = time.time()
 
         for i in range(self.train_critic_iterations):
             value_loss = self.train_critic(
@@ -298,6 +303,8 @@ class TspPPO(MultiTaskAlgorithm):
         min_distance = self.populations[-1].get_min_distance()
         if min_distance is None:
             min_distance = 100
+
+        # print('Time train critic:', time.time() - curr_time)
 
         self.run_info['return'].append(np.mean(all_total_rewards))
         self.run_info['c_loss'].append(value_loss)
@@ -478,19 +485,19 @@ if __name__ == '__main__':
 
     # Single-Task Training
     actor_path, critic_path = None, None
-    # actor_path = os.path.join(config.results_dir, save_name, 'pretrained', 'actor_weights_800')
-    # critic_path = os.path.join(config.results_dir, save_name, 'pretrained', 'critic_weights_800')
-    # problems = [Model(problem)]
-    # pops = [Population(pop_size, ref_point, problem)]
-    # ppo = TspPPO(problems, pops, max_nfe, actor_path, critic_path, run_name=save_name)
-    # ppo.run()
+    actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_10000')
+    critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_10000')
+    problems = [Model(problem)]
+    pops = [Population(pop_size, ref_point, problem)]
+    ppo = TspPPO(problems, pops, max_nfe, actor_path, critic_path, run_name=save_name)
+    ppo.run()
 
     # Multi-Task Training
-    problems = load_problem_set()
-    problems = [Model(problem) for problem in problems]
-    pops = [Population(pop_size, ref_point, problem) for problem in problems]
-    ppo = TspPPO(problems, pops, max_nfe, run_name=save_name)
-    ppo.run()
+    # problems = load_problem_set()
+    # problems = [Model(problem) for problem in problems]
+    # pops = [Population(pop_size, ref_point, problem) for problem in problems]
+    # ppo = TspPPO(problems, pops, max_nfe, run_name=save_name)
+    # ppo.run()
 
 
 

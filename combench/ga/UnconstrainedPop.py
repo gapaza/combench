@@ -24,6 +24,8 @@ class UnconstrainedPop(Population):
 
     def prune(self):
         objectives = self.eval_population()
+        if len(objectives) == 0:
+            return
         F = np.array(objectives)
         fronts = self.nds.do(F, n_stop_if_ranked=self.pop_size)
         survivors = []
