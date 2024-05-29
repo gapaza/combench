@@ -11,7 +11,7 @@ from combench.algorithm import discounted_cumulative_sums
 import random
 
 # ------- Run name
-save_name = 'tsp-search-problem2-r2'
+save_name = 'tsp-search-problem2-r3'
 metrics_num = 0
 
 # ------- Sampling parameters
@@ -24,7 +24,7 @@ task_epochs = 800
 max_nfe = 1e15
 clip_ratio = 0.2
 target_kl = 0.005
-entropy_coef = 0.08
+entropy_coef = 0.02
 
 # -------- Problem
 opt_dir = ['min']
