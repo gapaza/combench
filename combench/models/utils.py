@@ -1,4 +1,5 @@
 import numpy as np
+import random
 
 
 def random_binary_design(n, max_true=None):
@@ -9,6 +10,11 @@ def random_binary_design(n, max_true=None):
     for index in indices_to_flip:
         bit_array[index] = 1
     return bit_array.tolist()
+
+def random_binary_design2(n, max_true=None):
+    design = [random.choice([0, 1]) for x in range(n)]
+    return design
+
 
 def random_integer_design(n, ub):
     return list(np.random.randint(0, ub, n))

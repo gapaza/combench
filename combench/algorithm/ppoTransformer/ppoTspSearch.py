@@ -3,62 +3,51 @@ import matplotlib.gridspec as gridspec
 import numpy as np
 import os
 import tensorflow as tf
-from combench.core.algorithm import Algorithm
-from combench.algorithm.nn.binaryDecoder import get_models
+from combench.core.algorithm import MultiTaskAlgorithm
+from combench.algorithm.nn.tspDecoder import get_models
 from combench.algorithm import discounted_cumulative_sums
 import random
 
 # ------- Run name
-save_name = 'binary-search'
+save_name = 'tsp-search-problem2'
 
 # ------- Sampling parameters
-num_weight_samples = 4  # 4
-repeat_size = 1  # 3
-global_mini_batch_size = num_weight_samples * repeat_size
+num_problem_samples = 16  # 1
+repeat_size = 4  # 3
+global_mini_batch_size = num_problem_samples * repeat_size  # 12
 
 # -------- Training Parameters
 task_epochs = 800
-max_nfe = 1000
+max_nfe = 100000
 clip_ratio = 0.2
 target_kl = 0.005
-entropy_coef = 0.02
+entropy_coef = 0.08
 
 # -------- Problem
-opt_dir = ['max', 'min']
+opt_dir = ['min']
 use_constraints = False
-from combench.models.assigning import problem1 as problem
-from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
-from combench.models.assigning.nsga2 import AssigningPop as Population
-from combench.models.assigning.nsga2 import AssigningDesign as Design
+from combench.models.salesman import problem1 as problem
+from combench.models.salesman.TravelingSalesman import TravelingSalesman as Model
+from combench.models.salesman.nsga2 import TSPopulation as Population
+from combench.models.salesman.nsga2 import TSDesign as Design
 from combench.ga.NSGA2 import BenchNSGA2
-
-# opt_dir = ['max', 'max']
-# use_constraints = False
-# from combench.models.knapsack2 import problem1 as problem
-# from combench.models.knapsack2.Knapsack2 import Knapsack2 as Model
-# from combench.models.knapsack2.nsga2 import KPPopulation as Population
-# from combench.models.knapsack2.nsga2 import KPDesign as Design
-# from combench.ga.NSGA2 import BenchNSGA2
+num_cities = len(problem['cities'])
 
 # -------- Set random seed for reproducibility
 seed_num = 1
 random.seed(seed_num)
 tf.random.set_seed(seed_num)
 
-class UnconstrainedPPO(Algorithm):
+class TspPPO(MultiTaskAlgorithm):
 
-    def __init__(self, problem, population, max_nfe, actor_path=None, critic_path=None, run_name='ppo'):
-        super().__init__(problem, population, run_name, max_nfe)
+    def __init__(self, problems, populations, max_nfe, actor_path=None, critic_path=None, run_name='ppo'):
+        super().__init__(problems, populations, run_name, max_nfe)
         self.designs = []
         self.nfe = 0
         self.unique_designs = []
         self.unique_designs_bitstr = set()
         self.actor_path = actor_path
         self.critic_path = critic_path
-
-        # Objective Weights
-        num_keys = 9
-        self.objective_weights = list(np.linspace(0.00, 1.0, num_keys))
 
         # Optimizer parameters
         self.actor_learning_rate = 0.0001  # 0.0001
@@ -70,10 +59,8 @@ class UnconstrainedPPO(Algorithm):
         self.critic_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.critic_learning_rate)
 
         # Get number of design variables
-        self.num_vars = len(self.problem.random_design())
-        self.cond_vars = 1  # Just objective weight for now
-
-        self.actor, self.critic = get_models(self.num_vars, self.cond_vars, self.actor_path, self.critic_path)
+        self.num_vars = len(self.problems[0].random_design())
+        self.actor, self.critic = get_models(self.actor_path, self.critic_path)
 
         # PPO Parameters
         self.gamma = 0.99
@@ -83,7 +70,7 @@ class UnconstrainedPPO(Algorithm):
         self.entropy_coef = entropy_coef
         self.mini_batch_size = global_mini_batch_size
         self.decision_start_token_id = 1
-        self.num_actions = 2
+        self.num_actions = num_cities
         self.curr_epoch = 0
 
         # Update run info
@@ -92,33 +79,48 @@ class UnconstrainedPPO(Algorithm):
         self.run_info['kl'] = []
         self.run_info['entropy'] = []
 
+
     def run(self):
-        print('Running PPO')
+        print('Running TspPPO')
 
         self.curr_epoch = 0
-        while self.population.nfe < self.max_nfe:
+        while self.get_total_nfe() < self.max_nfe:
             self.run_epoch()
+            for pop in self.populations:
+                pop.prune()
             self.record()
             self.curr_epoch += 1
             if self.curr_epoch % 10 == 0:
-                self.population.plot_hv(self.save_dir)
+                self.populations[-1].plot_hv(self.save_dir)
+                self.populations[-1].plot_population(self.save_dir)
 
     def get_cond_vars(self):
-        weight_samples = []
-        weight_samples = random.sample(self.objective_weights, num_weight_samples)
+        problem_indices = list(range(len(self.problems)))
+
+        problem_samples_idx = random.sample(problem_indices, num_problem_samples)
+        problem_samples = [self.problems[idx] for idx in problem_samples_idx]
+        population_samples = [self.populations[idx] for idx in problem_samples_idx]
 
         # Construct conditioning tensor
         cond_vars = []
-        weight_samples_all = []
-        for weight in weight_samples:
-            sample_vars = [weight]
-            cond_vars.append(sample_vars)
-            weight_samples_all.append(weight)
+        problem_samples_all = []
+        population_samples_all = []
+        for idx, problem in enumerate(problem_samples):
+            p_cities = problem.cities  # (num_cities, 2)
+            cond_vars.append(p_cities)
+            problem_samples_all.append(problem)
+            population_samples_all.append(population_samples[idx])
 
-        weight_samples_all = [element for element in weight_samples_all for _ in range(repeat_size)]
+
+        problem_samples_all = [element for element in problem_samples_all for _ in range(repeat_size)]
+        problem_indices_all = [idx for idx in problem_samples_idx for _ in range(repeat_size)]
+        population_samples_all = [element for element in population_samples_all for _ in range(repeat_size)]
         cond_vars = [element for element in cond_vars for _ in range(repeat_size)]
-        cond_vars_tensor = tf.convert_to_tensor(cond_vars, dtype=tf.float32)
-        return cond_vars_tensor, weight_samples_all
+        cond_vars_tensor = tf.convert_to_tensor(cond_vars, dtype=tf.float32)  # (num_problem_samples, num_cities, 2)
+        return cond_vars_tensor, problem_samples_all, population_samples_all, problem_indices_all
+
+
+
 
     def run_epoch(self):
         new_designs = []
@@ -131,11 +133,15 @@ class UnconstrainedPPO(Algorithm):
         epoch_designs = []
         observation = [[self.decision_start_token_id] for x in range(self.mini_batch_size)]
         critic_observation_buffer = [[] for x in range(self.mini_batch_size)]
+        all_dists = []
+        num_feasible = 0
+        num_infeasible = 0
 
         # Get conditioning variables
-        cond_vars_tensor, weight_samples_all = self.get_cond_vars()
+        cond_vars_tensor, problem_samples_all, population_samples_all, problem_indices_all = self.get_cond_vars()
+        # print('Problem Indices:', problem_indices_all)
 
-        # Sample actions
+
         for t in range(self.num_vars):
             action_log_prob, action, all_action_probs = self.sample_actor(observation, cond_vars_tensor)  # returns shape: (batch,) and (batch,)
             action_log_prob = action_log_prob.numpy().tolist()
@@ -157,10 +163,16 @@ class UnconstrainedPPO(Algorithm):
                     epoch_designs.append(design_bitstr)
 
                     # Evaluate design
-                    reward, objs = self.calc_reward(
+                    reward, design_obj = self.calc_reward(
                         design_bitstr,
-                        weight_samples_all[idx]
+                        problem_samples_all[idx],
+                        population_samples_all[idx]
                     )
+                    if design_obj.is_feasible is True:
+                        all_dists.append(design_obj.objectives[0])
+                        num_feasible += 1
+                    else:
+                        num_infeasible += 1
                     all_rewards[idx].append(reward)
                     all_total_rewards.append(reward)
             else:
@@ -174,6 +186,12 @@ class UnconstrainedPPO(Algorithm):
                 critic_observation_buffer = deepcopy(observation_new)
             else:
                 observation = observation_new
+
+
+        # if len(all_dists) > 0:
+        #     print('Average distance:', np.mean(all_dists))
+        # else:
+        #     print('No feasible designs found')
 
         # -------------------------------------
         # Sample Critic
@@ -255,48 +273,52 @@ class UnconstrainedPPO(Algorithm):
             )
         value_loss = value_loss.numpy()
 
+        # Collect min population distances
+        min_pop_distances = [pop.get_min_distance() for pop in self.populations]
+        min_pop_distances = [dist for dist in min_pop_distances if dist is not None]
+        min_distance = np.mean(min_pop_distances)
+        min_distance = self.populations[-1].get_min_distance()
+        if min_distance is None:
+            min_distance = 100
+
         self.run_info['return'].append(np.mean(all_total_rewards))
         self.run_info['c_loss'].append(value_loss)
         self.run_info['kl'].append(kl)
         self.run_info['entropy'].append(entr)
+        # self.run_info['num_feasible'] = num_feasible
+        # self.run_info['num_infeasible'] = num_infeasible
+        self.run_info['avg_dist'] = np.mean(all_dists)
+        self.run_info['min_dist'] = min_distance
+        self.run_info['problems'] = problem_indices_all
+
 
         # Update nfe
-        self.nfe = deepcopy(self.population.nfe)
+        self.nfe = self.get_total_nfe()
 
     # -------------------------------------
     # Reward
     # -------------------------------------
 
-    def calc_reward(self, design_bitstr, weight):
+    def calc_reward(self, tour_bitstr, problem, population):
+        tour_bitlst = [int(bit) for bit in tour_bitstr]
 
-        design_bitlst = [int(bit) for bit in design_bitstr]
-        design = Design(design_bitlst, self.problem)
-        design = self.population.add_design(design)
-        objs = design.evaluate()
-
-        # Find weights
-        w1 = weight
-        w2 = 1.0 - weight
-
-        # Calculate terms
-        if opt_dir[0] == 'max':
-            term1 = abs(objs[0]) * w1
+        design = Design(tour_bitlst, problem)
+        design = population.add_design(design)
+        if design.is_feasible is True:
+            reward = -design.objectives[0]
         else:
-            term1 = (1 - objs[0]) * w1
+            reward = -5
+            unique_cities_visited = set()
+            for i in range(len(tour_bitlst)):
+                city = tour_bitlst[i]
+                if city not in unique_cities_visited:
+                    reward += 0.1
+                    unique_cities_visited.add(city)
+                else:
+                    break
+        reward = reward * 0.1
+        return reward, design
 
-        if opt_dir[1] == 'max':
-            term2 = abs(objs[1]) * w2
-        else:
-            term2 = (1 - objs[1]) * w2
-
-        # Reward
-        reward = term1 + term2
-
-        # Implement constraints if necessary
-        if use_constraints is True and design.is_feasible is False:
-            reward = design.feasibility_score * -0.01
-
-        return reward, objs
 
     # -------------------------------------
     # Actor-Critic Functions
@@ -311,7 +333,7 @@ class UnconstrainedPPO(Algorithm):
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, None)
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, 1)
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, 1)
         tf.TensorSpec(shape=(), dtype=tf.int32)
     ])
     def _sample_actor(self, observation_input, cross_input, inf_idx):
@@ -338,23 +360,20 @@ class UnconstrainedPPO(Algorithm):
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(), dtype=tf.int32)
     ])
     def _sample_critic(self, observation_input, parent_input, inf_idx):
         t_value = self.critic([observation_input, parent_input])  # (batch, seq_len, 2)
         t_value = t_value[:, :, 0]
         return t_value
-        # t_value_stiff = t_value[:, :, 0]  # (batch, 1)
-        # t_value_vol = t_value[:, :, 1]  # (batch, 1)
-        # return t_value_stiff, t_value_vol
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.int32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
     def train_actor(
             self,
@@ -412,7 +431,7 @@ class UnconstrainedPPO(Algorithm):
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
     def train_critic(
             self,
@@ -434,20 +453,29 @@ class UnconstrainedPPO(Algorithm):
         return value_loss
 
 
+from combench.models.salesman import load_problem_set
+
 
 if __name__ == '__main__':
 
     # Problem
-    problem = Model(problem)
+    # problems = [Model(problem)]
+    problems = load_problem_set()
+    problems = problems + [problem]
+    # problems = [problem]
+    problems = [Model(problem) for problem in problems]
 
     # Population
     pop_size = 50
-    ref_point = np.array([0, 1])
-    pop = Population(pop_size, ref_point, problem)
+    ref_point = np.array([1, 1])
+    # pop = Population(pop_size, ref_point, problem)
+    # pops = [pop]
+    pops = [Population(pop_size, ref_point, problem) for problem in problems]
 
     # PPO
-    ppo = UnconstrainedPPO(problem, pop, max_nfe, run_name=save_name)
+    ppo = TspPPO(problems, pops, max_nfe, run_name=save_name)
     ppo.run()
+
 
 
 

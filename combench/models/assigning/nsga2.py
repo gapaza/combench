@@ -90,7 +90,7 @@ if __name__ == '__main__':
     # RunnerNSGA2
     max_nfe = 5000
     print('Running RunnerNSGA2')
-    runner = BenchNSGA2(problem, max_nfe, run_name='assigning-bench-nsga2')
+    runner = BenchNSGA2(problem, max_nfe, run_name='assigning-bench2-nsga2')
     runner.run(pop_batch)
     runner.plot_results()
 

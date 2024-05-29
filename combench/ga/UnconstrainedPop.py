@@ -13,8 +13,8 @@ class UnconstrainedPop(Population):
         return Design(vector, self.problem)
 
     def calc_hv(self):
-        # objectives = self.eval_population()
-        objectives = [design.objectives for design in self.unique_designs]
+        objectives = self.eval_population()
+        # objectives = [design.objectives for design in self.unique_designs]
         if len(objectives) == 0:
             return 0.0
         F = np.array(objectives)

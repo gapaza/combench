@@ -110,7 +110,7 @@ class Population(ABC):
         plt.close('all')
         save_obj = [(nfe, hv) for nfe, hv in zip(self.nfes, self.hv)]
         with open(json_file, 'w') as f:
-            json.dump(save_obj, f)
+            json.dump(save_obj, f, indent=4)
 
     def plot_population(self, save_dir):
         pareto_plot_file = os.path.join(save_dir, 'designs_pareto.png')
@@ -139,7 +139,7 @@ class Population(ABC):
         plt.close('all')
         save_obj = [design.get_design_json() for design in self.designs if design.is_feasible]
         with open(pareto_json_file, 'w') as f:
-            json.dump(save_obj, f)
+            json.dump(save_obj, f, indent=4)
 
         # All designs
         x_vals_f, y_vals_f = [], []

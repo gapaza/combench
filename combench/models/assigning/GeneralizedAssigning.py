@@ -1,7 +1,7 @@
 import numpy as np
 import math
 from combench.core.model import Model
-from combench.models.utils import random_binary_design
+from combench.models.utils import random_binary_design, random_binary_design2
 import time
 
 class GeneralAssigning(Model):
@@ -44,7 +44,8 @@ class GeneralAssigning(Model):
 
 
     def random_design(self):
-        return random_binary_design(self.num_tasks * self.num_agents)
+        return random_binary_design2(self.num_tasks * self.num_agents)
+        # return random_binary_design(self.num_tasks * self.num_agents)
 
     def evaluate(self, design, normalize=True):
         profit, cost, overrun = self._evaluate(design)

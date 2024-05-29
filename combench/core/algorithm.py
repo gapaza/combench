@@ -40,6 +40,45 @@ class Algorithm(ABC):
 
 
 
+class MultiTaskAlgorithm(ABC):
+
+    def __init__(self, problems, populations, run_name, max_nfe):
+        self.problems = problems
+        self.populations = populations
+        self.nfe = 0
+        self.max_nfe = max_nfe
+        self.run_info = {
+
+        }
+
+        # Save
+        self.run_name = run_name
+        self.save_dir = os.path.join(config.results_dir, run_name)
+        if not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
+
+    @abstractmethod
+    def run(self, *args, **kwargs):
+        pass
+
+    def record(self):
+        for key, value in self.run_info.items():
+            if isinstance(value, list):
+                print("%s: %.5f" % (key, value[-1]), end=' | ')
+            else:
+                print("%s: %.5f" % (key, value), end=' | ')
+        total_hvs = []
+        for population in self.populations:
+            population.record()
+            total_hvs.append(population.hv[-1])
+        avg_hv = np.mean(total_hvs)
+        print('nfe:', self.nfe, 'hv:', avg_hv)
+
+    def get_total_nfe(self):
+        total_nfe = 0
+        for population in self.populations:
+            total_nfe += population.nfe
+        return total_nfe
 
 
 

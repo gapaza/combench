@@ -8,42 +8,49 @@ from keras_nlp.layers import TransformerDecoder
 from keras_nlp.layers import TokenAndPositionEmbedding
 from keras_nlp.layers import SinePositionEncoding
 
-# Vocabulary
+num_cities = 9
+
+
+# Vocabulary (TSP)
 # 0: [pad]
 # 1: [start]
-# 2: 0-bit
-# 3: 1-bit
+# 2: City 1
+# 3: City 2
+# 4: City 3
+# 5: City 4
+# 6: City 5
 
-actor_embed_dim = 16
-actor_heads = 8
-actor_dense = 256
+actor_embed_dim = 32
+actor_heads = 16
+actor_dense = 512
 actor_dropout = 0.0
 
-critic_embed_dim = 16
-critic_heads = 8
-critic_dense = 256
+critic_embed_dim = 32
+critic_heads = 16
+critic_dense = 512
 critic_dropout = 0.0
 
 # ------------------------------------
 # Actor
 # ------------------------------------
 
-@keras.saving.register_keras_serializable(package="BinaryDecoder", name="BinaryDecoder")
-class BinaryDecoder(tf.keras.Model):
+@keras.saving.register_keras_serializable(package="TspDecoder", name="TspDecoder")
+class TspDecoder(tf.keras.Model):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.supports_masking = True
 
         # Variables
-        self.vocab_size = 4
-        self.vocab_output_size = 2
-        self.gen_design_seq_length = config.num_vars
+        self.vocab_size = num_cities + 2
+        self.vocab_output_size = num_cities
+        self.gen_design_seq_length = num_cities
         self.embed_dim = actor_embed_dim
         self.num_heads = actor_heads
         self.dense_dim = actor_dense
 
         # Conditioning Vector Positional Encoding
         self.positional_encoding = SinePositionEncoding(name='positional_encoding')
+        self.coordinate_projection = layers.Dense(self.embed_dim, name='coordinate_projection', activation='linear')
 
         # Token + Position embedding
         self.design_embedding_layer = TokenAndPositionEmbedding(
@@ -55,8 +62,10 @@ class BinaryDecoder(tf.keras.Model):
 
         # Decoder Stack
         self.normalize_first = False
-        self.decoder_1 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_1', dropout=actor_dropout)
-        self.decoder_2 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_2', dropout=actor_dropout)
+        self.decoder_1 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first,
+                                            name='decoder_1', dropout=actor_dropout)
+        self.decoder_2 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first,
+                                            name='decoder_2', dropout=actor_dropout)
         # self.decoder_3 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_3', dropout=actor_dropout)
         # self.decoder_4 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_4', dropout=actor_dropout)
         # self.decoder_5 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_5', dropout=actor_dropout)
@@ -68,16 +77,16 @@ class BinaryDecoder(tf.keras.Model):
             name="design_prediction_head"
         )
         self.activation = layers.Activation('softmax', dtype='float32')
-
-
+        
+        
     def call(self, inputs, training=False, mask=None):
-        design_sequences, weights = inputs
+        tour_sequences, city_locations = inputs
 
         # 1. Weights
-        weight_seq = self.add_positional_encoding(weights)
+        weight_seq = self.add_positional_encoding(city_locations)
 
         # 2. Embed design_sequences
-        design_sequences_embedded = self.design_embedding_layer(design_sequences, training=training)
+        design_sequences_embedded = self.design_embedding_layer(tour_sequences, training=training)
 
         # 3. Decoder Stack
         decoded_design = design_sequences_embedded
@@ -96,8 +105,9 @@ class BinaryDecoder(tf.keras.Model):
     def add_positional_encoding(self, weights):
 
         # Tile conditioning weights across embedding dimension
-        weight_seq = tf.expand_dims(weights, axis=-1)
-        weight_seq = tf.tile(weight_seq, [1, 1, self.embed_dim])
+        # weight_seq = tf.expand_dims(weights, axis=-1)
+        # weight_seq = tf.tile(weight_seq, [1, 1, self.embed_dim])
+        weight_seq = self.coordinate_projection(weights)
 
         # For sine positional encoding
         pos_enc = self.positional_encoding(weight_seq)
@@ -113,27 +123,27 @@ class BinaryDecoder(tf.keras.Model):
     def from_config(cls, config):
         return cls(**config)
 
-
 # ------------------------------------
 # Critic
 # ------------------------------------
 
-@keras.saving.register_keras_serializable(package="BinaryDecoderCritic", name="BinaryDecoderCritic")
-class BinaryDecoderCritic(tf.keras.Model):
+@keras.saving.register_keras_serializable(package="TspDecoderCritic", name="TspDecoderCritic")
+class TspDecoderCritic(tf.keras.Model):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.supports_masking = True
 
         # Variables
         self.num_objectives = 1
-        self.vocab_size = 4
-        self.gen_design_seq_length = config.num_vars + 1
+        self.vocab_size = num_cities + 2
+        self.gen_design_seq_length = num_cities + 1
         self.embed_dim = critic_embed_dim
         self.num_heads = critic_heads
         self.dense_dim = critic_dense
 
         # Conditioning Vector Positional Encoding
         self.positional_encoding = SinePositionEncoding(name='positional_encoding')
+        self.coordinate_projection = layers.Dense(self.embed_dim, name='coordinate_projection', activation='linear')
 
         # Token + Position embedding
         self.design_embedding_layer = TokenAndPositionEmbedding(
@@ -153,14 +163,15 @@ class BinaryDecoderCritic(tf.keras.Model):
         self.activation = layers.Activation('linear', dtype='float32')
 
     def call(self, inputs, training=False, mask=None):
-        design_sequences, weights = inputs
+        tour_sequences, city_locations = inputs
+        # tour_sequences (batch_size, seq_length)
+        # city_locations (batch_size, num_cities, 2)  # (x, y)
 
         # 1. Weights
-        weight_seq = self.add_positional_encoding(weights)
-        # weight_seq = weight_seq[:, 0:1, :]  # Only use first weight
+        weight_seq = self.add_positional_encoding(city_locations)
 
         # 2. Embed design_sequences
-        design_sequences_embedded = self.design_embedding_layer(design_sequences, training=training)
+        design_sequences_embedded = self.design_embedding_layer(tour_sequences, training=training)
 
         # 3. Decoder Stack
         decoded_design = design_sequences_embedded
@@ -175,8 +186,9 @@ class BinaryDecoderCritic(tf.keras.Model):
 
     def add_positional_encoding(self, weights):
         # Tile conditioning weights across embedding dimension
-        weight_seq = tf.expand_dims(weights, axis=-1)
-        weight_seq = tf.tile(weight_seq, [1, 1, self.embed_dim])
+        # weight_seq = tf.expand_dims(weights, axis=-1)
+        # weight_seq = tf.tile(weight_seq, [1, 1, self.embed_dim])
+        weight_seq = self.coordinate_projection(weights)
 
         # For sine positional encoding
         pos_enc = self.positional_encoding(weight_seq)
@@ -192,23 +204,21 @@ class BinaryDecoderCritic(tf.keras.Model):
     def from_config(cls, config):
         return cls(**config)
 
+
 # ------------------------------------
 # Get
 # ------------------------------------
 
-def get_models(design_len, cond_vals, checkpoint_path_actor=None, checkpoint_path_critic=None):
-    design_len = design_len
-    conditioning_values = cond_vals
+def get_models(checkpoint_path_actor=None, checkpoint_path_critic=None):
+    actor_model = TspDecoder()
+    tours = tf.zeros((1, num_cities))
+    city_locations = tf.zeros((1, num_cities, 2))
+    actor_model([tours, city_locations])
 
-    actor_model = BinaryDecoder()
-    decisions = tf.zeros((1, design_len))
-    weights = tf.zeros((1, conditioning_values))
-    actor_model([decisions, weights])
-
-    critic_model = BinaryDecoderCritic()
-    decisions = tf.zeros((1, design_len + 1))
-    weights = tf.zeros((1, conditioning_values))
-    critic_model([decisions, weights])
+    critic_model = TspDecoderCritic()
+    tours = tf.zeros((1, num_cities))
+    city_locations = tf.zeros((1, num_cities, 2))
+    critic_model([tours, city_locations])
 
     # Load Weights
     if checkpoint_path_actor:
@@ -217,6 +227,9 @@ def get_models(design_len, cond_vals, checkpoint_path_actor=None, checkpoint_pat
         critic_model.load_weights(checkpoint_path_critic).expect_partial()
 
     return actor_model, critic_model
+
+
+
 
 
 
