@@ -35,6 +35,10 @@ class TravelingSalesman(Model):
         normalized_coords = [
             ((x - min_x) / range_x, (y - min_y) / range_y) for x, y in coords
         ]
+
+        # Sort normalized coords by x value
+        normalized_coords = sorted(normalized_coords, key=lambda x: x[0])
+
         return normalized_coords
 
 

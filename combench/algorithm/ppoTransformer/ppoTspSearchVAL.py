@@ -13,7 +13,7 @@ import random
 
 # ------- Run name
 save_name = 'tsp-search-problem2-val'
-load_name = 'tsp-search-problem2'
+load_name = 'tsp-search-problem2-r10'
 metrics_num = 0
 
 # ------- Sampling parameters
@@ -58,7 +58,7 @@ class TspPPO(MultiTaskAlgorithm):
         # Optimizer parameters
         self.actor_learning_rate = 0.0001  # 0.0001
         self.critic_learning_rate = 0.0001  # 0.0001
-        self.train_actor_iterations = 250  # was 250
+        self.train_actor_iterations = 40  # was 250
         self.train_critic_iterations = 40  # was 40
 
         self.actor_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.actor_learning_rate)
@@ -485,8 +485,8 @@ if __name__ == '__main__':
 
     # Single-Task Training
     actor_path, critic_path = None, None
-    actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_10000')
-    critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_10000')
+    actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_5000')
+    critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_5000')
     problems = [Model(problem)]
     pops = [Population(pop_size, ref_point, problem)]
     ppo = TspPPO(problems, pops, max_nfe, actor_path, critic_path, run_name=save_name)

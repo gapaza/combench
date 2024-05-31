@@ -3,6 +3,7 @@ import matplotlib.gridspec as gridspec
 import numpy as np
 import os
 import tensorflow as tf
+import tensorflow_addons as tfa
 
 import config
 from combench.core.algorithm import MultiTaskAlgorithm
@@ -11,7 +12,7 @@ from combench.algorithm import discounted_cumulative_sums
 import random
 
 # ------- Run name
-save_name = 'tsp-search-problem2-r3'
+save_name = 'tsp-search-problem2-r12'
 metrics_num = 0
 
 # ------- Sampling parameters
@@ -23,8 +24,8 @@ global_mini_batch_size = num_problem_samples * repeat_size  # 12
 task_epochs = 800
 max_nfe = 1e15
 clip_ratio = 0.2
-target_kl = 0.005
-entropy_coef = 0.02
+target_kl = 0.001
+entropy_coef = 0.2
 
 # -------- Problem
 opt_dir = ['min']
@@ -55,11 +56,30 @@ class TspPPO(MultiTaskAlgorithm):
         # Optimizer parameters
         self.actor_learning_rate = 0.0001  # 0.0001
         self.critic_learning_rate = 0.0001  # 0.0001
-        self.train_actor_iterations = 250  # was 250
+        self.train_actor_iterations = 100  # was 250
         self.train_critic_iterations = 40  # was 40
+        self.actor_learning_rate = tf.keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=0.0,
+            decay_steps=1000,
+            warmup_steps=1000,
+            warmup_target=self.actor_learning_rate,
+            alpha=1.0,
+        )
+        self.critic_learning_rate = tf.keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=0.0,
+            decay_steps=1000,
+            warmup_steps=100,
+            warmup_target=self.critic_learning_rate,
+            alpha=1.0,
+        )
 
         self.actor_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.actor_learning_rate)
         self.critic_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.critic_learning_rate)
+        # Rectified Adam
+        # self.actor_optimizer = tfa.optimizers.RectifiedAdam(learning_rate=self.actor_learning_rate)
+        # self.critic_optimizer = tfa.optimizers.RectifiedAdam(learning_rate=self.critic_learning_rate)
+        # Warm up scheduler
+
 
         # Get number of design variables
         self.num_vars = len(self.problems[0].random_design())
@@ -102,7 +122,7 @@ class TspPPO(MultiTaskAlgorithm):
             self.curr_epoch += 1
 
             # Only relevant for single-task learning
-            if self.curr_epoch % 25 == 0:
+            if self.curr_epoch % 50 == 0:
                 self.populations[-1].plot_hv(self.save_dir)
                 self.populations[-1].plot_population(self.save_dir)
                 self.plot_metrics(['return', 'c_loss', 'kl', 'entropy', 'avg_dist'], sn=metrics_num)
