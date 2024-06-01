@@ -114,22 +114,14 @@ class TravelingSalesman(Model):
 
         # Calculate the total distance traveled
         unique_cities_visited = set()
-        # unique_edges_traversed = set()
         for i in range(len(design) - 1):
             city1 = self.cities[design[i]]
             city2 = self.cities[design[i + 1]]
             dist = math.sqrt(abs(city1[0] - city2[0]) ** 2) + (abs(city1[1] - city2[1]) ** 2)
             if city2 in unique_cities_visited:
-                dist *= 2
+                dist += 2.0
             if city1 == city2:
-                dist += 0.5
-            # edge = (design[i], design[i + 1])
-            # rev_edge = (design[i + 1], design[i])
-            # if edge in unique_edges_traversed or rev_edge in unique_edges_traversed:
-            #     dist *= 2
-            # else:
-            #     unique_edges_traversed.add(edge)
-            #     unique_edges_traversed.add(rev_edge)
+                dist += 2.0
             unique_cities_visited.add(city1)
             total_distance += dist
         # print('Tour distance: {}'.format(total_distance))

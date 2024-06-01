@@ -12,7 +12,7 @@ from combench.algorithm import discounted_cumulative_sums
 import random
 
 # ------- Run name
-save_name = 'tsp-search-problem2-r12'
+save_name = 'tsp-search-problem1-r1'
 metrics_num = 0
 
 # ------- Sampling parameters
@@ -21,7 +21,6 @@ repeat_size = 4  # 3
 global_mini_batch_size = num_problem_samples * repeat_size  # 12
 
 # -------- Training Parameters
-task_epochs = 800
 max_nfe = 1e15
 clip_ratio = 0.2
 target_kl = 0.001
