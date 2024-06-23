@@ -17,9 +17,11 @@ class Model(ABC):
             salt = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
             print('Problem name not provided. Using salt string: {}'.format(salt))
             self.problem_formulation['name'] = salt
+        self.model_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
         self.problem_store_path = os.path.join(config.database_dir, self.problem_formulation['name'])
         self.problem_store = self.load_problem_store()
         self.norms = None
+        self.pool = None
 
     @abstractmethod
     def load_norms(self):

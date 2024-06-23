@@ -2,8 +2,108 @@ import numpy as np
 from scipy.spatial import KDTree
 from combench.models.truss.stiffness.generateNC import generateNC
 import time
-
+from copy import deepcopy
 import config
+
+
+def vox_space(problem, connectivity_array, resolution=100):
+    nodes = deepcopy(problem['nodes'])
+    nodes = np.array(nodes).tolist()
+
+    x_coords = [node[0] for node in nodes]
+    y_coords = [node[1] for node in nodes]
+    x_range = max(x_coords) - min(x_coords)
+    y_range = max(y_coords) - min(y_coords)
+
+
+    member_radii = problem['member_radii']
+    radius = member_radii
+
+    # Add depth as third dimension
+    for idx in range(len(nodes)):
+        nodes[idx].append(0)
+    nodal_coords = np.array(nodes)
+
+    # 1. Create bounding box
+    x_1 = 0 - radius
+    x_2 = x_range + radius
+    y_1 = 0 - radius
+    y_2 = y_range + radius
+    z_1 = 0 - radius
+    z_2 = 0 + radius
+    width = abs(x_2 - x_1)
+    height = abs(y_2 - y_1)
+    depth = abs(z_2 - z_1)
+    bounding_box_volume = depth * width * height
+
+    # 2. Create voxel grid
+    nodes_used = set()
+    for ca in connectivity_array:
+        nodes_used.add(ca[0])
+        nodes_used.add(ca[1])
+    nodes_used = list(nodes_used)
+    if len(nodes_used) == 0:
+        return 0.0
+    node_x_vals = [nodal_coords[node][0] for node in nodes_used]
+    node_y_vals = [nodal_coords[node][1] for node in nodes_used]
+    x_min, x_max = min(node_x_vals) - radius, max(node_x_vals) + radius
+    y_min, y_max = min(node_y_vals) - radius, max(node_y_vals) + radius
+
+    # voxel_size = depth / 10
+    # voxel_size = width / resolution
+    voxel_width = width / resolution
+    voxel_height = height / resolution
+    voxel_depth = depth / resolution
+    # print('Voxel Sizes:', voxel_width, voxel_height, voxel_depth)
+    x, y, z = np.meshgrid(
+        # np.arange(x_1, x_2, voxel_width),
+        # np.arange(y_1, y_2, voxel_height),
+        # np.arange(z_1, z_2, voxel_depth),
+        np.arange(x_min, x_max, voxel_width),
+        np.arange(y_min, y_max, voxel_height),
+        np.arange(z_1, z_2, voxel_depth),
+        indexing='ij'
+    )
+    voxel_centers = np.vstack((x.ravel(), y.ravel(), z.ravel())).T
+    # print('Number of Voxels:', len(voxel_centers))
+
+    # Use a KDTree for efficient distance queries
+    tree = KDTree(voxel_centers)
+    intersected_voxels = set()
+
+    all_points = []
+    for element in connectivity_array:
+        start_node = np.array(nodal_coords[element[0]])
+        end_node = np.array(nodal_coords[element[1]])
+        direction = end_node - start_node
+        length = np.linalg.norm(direction)
+        direction = direction / length
+
+        # step_len = radius / 10
+        # num_steps = math.floor(length / step_len)
+        num_steps = 100
+        step_len = length / num_steps
+        for i in range(num_steps):
+            point = start_node + i * step_len * direction
+            all_points.append(point)
+            # idx = tree.query_ball_point(point, radius, workers=1)
+            # intersected_voxels.update(idx)
+
+    all_points = np.array(all_points)
+    idx = tree.query_ball_point(all_points, radius, workers=-1)
+    for i in idx:
+        intersected_voxels.update(i)
+
+    # voxel_volume = voxel_size ** 3
+    voxel_volume = voxel_width * voxel_height * voxel_depth
+    truss_volume = len(intersected_voxels) * voxel_volume
+    volume_fraction = truss_volume / bounding_box_volume
+    # print('Truss Volume:', truss_volume)  # 0.015307337294603601
+    return volume_fraction
+
+
+
+
 
 def voxelize_space(radius, sidelen, nodal_coords, connectivity_array, resolution=100):
 

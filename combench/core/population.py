@@ -41,7 +41,8 @@ class Population(ABC):
         if design_str not in self.unique_designs_bitstr:
             self.unique_designs_bitstr.add(design_str)
             design.evaluate()
-            copied_design = deepcopy(design)
+            # copied_design = deepcopy(design)
+            copied_design = design
             self.unique_designs.append(copied_design)
             self.designs.append(copied_design)
             self.nfe += 1
