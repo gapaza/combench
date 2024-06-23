@@ -12,11 +12,11 @@ from combench.algorithm import discounted_cumulative_sums
 import random
 
 # ------- Run name
-save_name = 'tsp-search-problem1-r1'
-metrics_num = 0
+save_name = 'tsp-search-multi-problem3'
+metrics_num = 1
 
 # ------- Sampling parameters
-num_problem_samples = 32  # 1
+num_problem_samples = 8  # 1
 repeat_size = 4  # 3
 global_mini_batch_size = num_problem_samples * repeat_size  # 12
 
@@ -24,7 +24,7 @@ global_mini_batch_size = num_problem_samples * repeat_size  # 12
 max_nfe = 1e15
 clip_ratio = 0.2
 target_kl = 0.001
-entropy_coef = 0.2
+entropy_coef = 0.02
 
 # -------- Problem
 opt_dir = ['min']
@@ -33,7 +33,7 @@ from combench.models.salesman.TravelingSalesman import TravelingSalesman as Mode
 from combench.models.salesman.nsga2 import TSPopulation as Population
 from combench.models.salesman.nsga2 import TSDesign as Design
 from combench.models.salesman import load_problem_set, generate_problem_set
-from combench.models.salesman import problem1 as problem
+from combench.models.salesman import problem3 as problem
 num_cities = len(problem['cities'])
 
 # -------- Set random seed for reproducibility
@@ -108,6 +108,7 @@ class TspPPO(MultiTaskAlgorithm):
         self.run_info['kl'] = []
         self.run_info['entropy'] = []
         self.run_info['avg_dist'] = []
+        self.run_info['design'] = []
         # self.run_info['min_dist'] = []
         # self.run_info['problems'] = []
 
@@ -133,9 +134,9 @@ class TspPPO(MultiTaskAlgorithm):
                 self.critic.save_weights(t_critic_save_path)
 
     def get_cond_vars(self):
-        rnd_problems = generate_problem_set(num_problem_samples, num_cities)
-        self.problems = [Model(problem) for problem in rnd_problems]
-        self.populations = [Population(50, np.array([1, 1]), problem) for problem in self.problems]
+        # rnd_problems = generate_problem_set(num_problem_samples, num_cities)
+        # self.problems = [Model(problem) for problem in rnd_problems]
+        # self.populations = [Population(50, np.array([1, 1]), problem) for problem in self.problems]
 
         problem_indices = list(range(len(self.problems)))
         problem_samples_idx = random.sample(problem_indices, num_problem_samples)
@@ -201,7 +202,7 @@ class TspPPO(MultiTaskAlgorithm):
 
                     # Evaluate design
                     reward, design_obj = self.calc_reward(
-                        design_bitstr,
+                        design,
                         problem_samples_all[idx],
                         population_samples_all[idx]
                     )
@@ -290,7 +291,7 @@ class TspPPO(MultiTaskAlgorithm):
                 advantage_tensor,
                 cond_vars_tensor
             )
-            if kl > 1.5 * self.target_kl:
+            if abs(kl) > 1.5 * self.target_kl:
                 # Early Stopping
                 break
         kl = kl.numpy()
@@ -327,6 +328,7 @@ class TspPPO(MultiTaskAlgorithm):
         self.run_info['avg_dist'].append(np.mean(all_dists))
         # self.run_info['min_dist'].append(min_distance)
         # self.run_info['problems'] = problem_indices_all
+        self.run_info['design'].append(designs[-1])
 
 
         # Update nfe
@@ -336,8 +338,9 @@ class TspPPO(MultiTaskAlgorithm):
     # Reward
     # -------------------------------------
 
-    def calc_reward(self, tour_bitstr, problem, population):
-        tour_bitlst = [int(bit) for bit in tour_bitstr]
+    def calc_reward(self, tour_bitlst_copy, problem, population):
+        tour_bitlst = deepcopy(tour_bitlst_copy)
+        # tour_bitlst = [int(bit) for bit in tour_bitstr]
 
         design = Design(tour_bitlst, problem)
         design = population.add_design(design)
@@ -497,8 +500,8 @@ if __name__ == '__main__':
 
     # Single-Task Training
     actor_path, critic_path = None, None
-    # actor_path = os.path.join(config.results_dir, save_name, 'pretrained', 'actor_weights_800')
-    # critic_path = os.path.join(config.results_dir, save_name, 'pretrained', 'critic_weights_800')
+    # actor_path = os.path.join(config.results_dir, save_name, 'pretrained', 'actor_weights_178000')
+    # critic_path = os.path.join(config.results_dir, save_name, 'pretrained', 'critic_weights_178000')
     # problems = [Model(problem)]
     # pops = [Population(pop_size, ref_point, problem)]
     # ppo = TspPPO(problems, pops, max_nfe, actor_path, critic_path, run_name=save_name)
@@ -508,7 +511,7 @@ if __name__ == '__main__':
     problems = load_problem_set()
     problems = [Model(problem) for problem in problems]
     pops = [Population(pop_size, ref_point, problem) for problem in problems]
-    ppo = TspPPO(problems, pops, max_nfe, run_name=save_name)
+    ppo = TspPPO(problems, pops, max_nfe, actor_path, critic_path, run_name=save_name)
     ppo.run()
 
 
