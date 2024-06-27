@@ -10,6 +10,8 @@ from combench.ga.NSGA2 import NSGA2
 from combench.core.design import Design
 from combench.ga.UnconstrainedPop import UnconstrainedPop
 from combench.models import truss
+from combench.models.truss.eval_process import EvaluationProcessManager
+
 
 class TrussDesign(Design):
     def __init__(self, vector, problem):
@@ -43,6 +45,13 @@ class TrussPopulation(UnconstrainedPop):
 
     def __init__(self, pop_size, ref_point, problem):
         super().__init__(pop_size, ref_point, problem)
+        self.eval_manager = None
+
+    def init_eval_mamanger(self):
+        if self.eval_manager is None:
+            print('INITIALIZING EVAL MANAGER --> CREATING', 12,'PROCESSES')
+            self.eval_manager = EvaluationProcessManager(num_processes=12)
+
 
     def create_design(self, vector=None):
         design = TrussDesign(vector, self.problem)
@@ -54,10 +63,15 @@ class TrussPopulation(UnconstrainedPop):
         unkonwn_designs = [design for design in self.designs if not design.is_evaluated()]
         unknown_designs_vectors = [design.vector for design in unkonwn_designs]
         if len(unknown_designs_vectors) > 0:
-            unknown_designs_objectives = self.problem.evaluate_batch(unknown_designs_vectors, normalize=True)
+            self.init_eval_mamanger()
+
+            batch_probs = [self.problem.problem_formulation for _ in range(len(unknown_designs_vectors))]
+            unknown_designs_objectives = self.eval_manager.evaluate(batch_probs, unknown_designs_vectors)
+            # unknown_designs_objectives = self.problem.evaluate_batch(unknown_designs_vectors, normalize=True)
             for design, objs in zip(unkonwn_designs, unknown_designs_objectives):
                 design.objectives = objs
                 design.is_feasible = True
+
 
         # Collect objectives
         objectives = []
@@ -66,7 +80,7 @@ class TrussPopulation(UnconstrainedPop):
             design_str = design.get_design_str()
             if design_str not in self.unique_designs_bitstr:
                 self.unique_designs_bitstr.add(design_str)
-                self.unique_designs.append(deepcopy(design))
+                self.unique_designs.append(design)
                 self.nfe += 1
             objectives.append(objs)
         return objectives
@@ -103,14 +117,23 @@ class TrussPopulation(UnconstrainedPop):
         # Viz 3 Individual Select Pareto Designs
         if len(self.designs) > 3:
             p = self.problem.problem_formulation
-            design_info = [[design.get_plotting_objectives(), design.vector] for design in self.designs]
-            design_info = sorted(design_info, key=lambda x: x[0][0])
-            d_first = design_info[0]
-            d_middle = design_info[len(design_info)//2]
-            d_last = design_info[-1]
-            truss.rep.viz(p, d_first[1], f_name='d1_low_stiff.png', base_dir=save_dir)
-            truss.rep.viz(p, d_middle[1], f_name='d2_mid_stiff.png', base_dir=save_dir)
-            truss.rep.viz(p, d_last[1], f_name='d3_high_stiff.png', base_dir=save_dir)
+            design_info = [[design.get_plotting_objectives(), design.vector] for design in self.designs if design.objectives[0] != 0]
+            design_info_s = sorted(design_info, key=lambda x: x[0][0])
+            design_info_v = sorted(design_info, key=lambda x: x[0][1])
+            d_first_s = design_info_s[0]
+            d_last_s = design_info_s[-1]
+            d_first_v = design_info_v[0]
+            d_last_v = design_info_v[-1]
+            truss.rep.viz(p, d_first_s[1], f_name='d_stiff_low.png', base_dir=save_dir)
+            truss.rep.viz(p, d_last_s[1], f_name='d_stiff_high.png', base_dir=save_dir)
+            truss.rep.viz(p, d_first_v[1], f_name='d_volfrac_low.png', base_dir=save_dir)
+            truss.rep.viz(p, d_last_v[1], f_name='d_volfrac_high.png', base_dir=save_dir)
+        # Viz the fully connected design
+        p = self.problem.problem_formulation
+        fc = [1 for x in range(truss.rep.get_num_bits(p))]
+        fc = truss.rep.remove_overlapping_members(p, fc)
+        truss.rep.viz(p, fc, f_name='fully_connected.png', base_dir=save_dir)
+
 
         # All designs
         x_vals_f, y_vals_f = [], []
@@ -137,35 +160,53 @@ class TrussPopulation(UnconstrainedPop):
 
 
 
-from combench.models.truss.TrussModel2 import TrussModel2
-from combench.models.truss import Cantilever
+from combench.models.truss.TrussModel import TrussModel
+
+
+
+def t_eval(t_problem):
+    design = []
+    truss.rep.viz(t_problem, design, f_name='test1-design2.png')
+    exit(0)
 
 
 if __name__ == '__main__':
-    param_dict = {
-        'x_range': 3,
-        'y_range': 3,
-        'x_res': 3,
-        'y_res': 3,
-        'radii': 0.2,
-        'y_modulus': 210e9
-    }
-    problem = Cantilever.type_1(
-        param_dict
-    )
+    # from combench.models.truss.problems.truss_type_1 import TrussType1
+    # N = 4
+    # problem_set = TrussType1.enumerate({
+    #     'x_range': N,
+    #     'y_range': N,
+    #     'x_res': N,
+    #     'y_res': N,
+    #     'radii': 0.2,
+    #     'y_modulus': 210e9
+    # })
+    # random.seed(4)
+    # problem_set = random.sample(problem_set, 64)
+    # print('NUM PROBLEMS:', len(problem_set))
+    # problem = problem_set[0]
+    # truss.set_norms(problem)
+    # v_problem = problem
 
-    p_model = TrussModel2(problem)
+
+    from combench.models.truss import train_problems, val_problems
+    v_problem = val_problems[0]
+    truss.set_norms(v_problem)
+
+
+
+
+
+
 
     # Population
+    p_model = TrussModel(v_problem)
     pop_size = 30
     ref_point = np.array([0, 1])
     pop = TrussPopulation(pop_size, ref_point, p_model)
-
-    # NSGA2
-    max_nfe = 1000
-    nsga2 = NSGA2(pop, p_model, max_nfe, run_name='truss2')
+    max_nfe = 5000
+    nsga2 = NSGA2(pop, p_model, max_nfe, run_name='cantilever-4x4-ga-50res-flex1')
     nsga2.run()
-
 
 
 

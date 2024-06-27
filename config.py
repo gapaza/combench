@@ -2,7 +2,7 @@ import os
 import tensorflow as tf
 
 # disable gpu
-tf.config.set_visible_devices([], 'GPU')
+# tf.config.set_visible_devices([], 'GPU')
 
 #
 #       _____   _                   _                _
@@ -49,7 +49,7 @@ sidenum_nvar_map = {2: 6, 3: 30, 4: 108, 5: 280, 6: 600, 7: 1134, 8: 1960, 9: 31
 # num_vars = sidenum_nvar_map[sidenum]
 
 # For 3x3 cantilever truss problem
-num_vars = 36
+num_vars = 120  # 36
 
 
 

@@ -2,9 +2,11 @@ import config
 import requests
 import json
 import numpy as np
-from combench.models.truss.stiffness.generateNC import generateNC
 
-
+""" 
+     - The purpose of this is to use PyMesh to get a very accurate estimate of a truss volume fraction.
+     - The values calculated are used to validate other methods for calculating volume fraction.
+"""
 
 def call_pymesh():
 
@@ -12,7 +14,7 @@ def call_pymesh():
     num_vars = config.sidenum_nvar_map[sidenum]
     radius = 1.0
     sidelen = 0.5
-    NC = generateNC(sidelen, sidenum)
+    NC = []
     CA = np.array([
         [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9],
         [2, 3], [2, 4], [2, 5], [2, 6], [2, 7], [2, 8], [2, 9],

@@ -171,6 +171,19 @@ def get_load_nodes(load_conds):
     return list(load_nodes)
 
 
+def get_edge_nodes(problem):
+    nodes = problem['nodes']
+    min_x = min([x[0] for x in nodes])
+    max_x = max([x[0] for x in nodes])
+    min_y = min([x[1] for x in nodes])
+    max_y = max([x[1] for x in nodes])
+    edge_indices = []
+    for idx, n in enumerate(nodes):
+        if n[0] in [min_x, max_x] or n[1] in [min_y, max_y]:
+            edge_indices.append(idx)
+    return edge_indices
+
+
 def get_all_fixed_nodes(problem):
     nodes_dof = problem['nodes_dof']
     fixed_nodes = set()
@@ -769,7 +782,7 @@ def viz2(problem, design_rep, f_name=None, optional_text=None, base_dir=None):
 
     # Create GridSpec layout
     gs = gridspec.GridSpec(rows, cols)
-    fig = plt.figure(figsize=(3.5 * cols, 3.5 * rows))  # Adjust the figure size based on rows and cols
+    fig = plt.figure(figsize=(3.5 * cols, 3.5 * rows), dpi=150)  # Adjust the figure size based on rows and cols
 
     # gs = gridspec.GridSpec(2, n_loads)
     # fig = plt.figure(figsize=(5*n_loads, 5))  # default [6.4, 4.8], W x H  9x6, 12x8
@@ -905,8 +918,8 @@ def viz2(problem, design_rep, f_name=None, optional_text=None, base_dir=None):
     plt.figtext(
         0.05, y_center,
         wrapped_text,
-        ha='left', va='bottom', fontsize=8,
-        bbox=dict(facecolor='grey', alpha=0.5)
+        ha='left', va='bottom', fontsize=9,
+        bbox=dict(facecolor='grey', alpha=0.5),
     )
     plt.tight_layout()
 
@@ -978,7 +991,7 @@ def viz_datapoint(problem, sample, f_name=None):
         0.12, 0.25,
         before_edit_text,
         ha='left', va='bottom', fontsize=10,
-        bbox=dict(facecolor='grey', alpha=0.5)
+        bbox=dict(facecolor='grey', alpha=0.5),
     )
 
     # Design Fixed Text
@@ -1036,19 +1049,34 @@ def get_design_metrics(problem, design_rep):
     num_members_no_overlaps = sum(no_overlaps)
     used_nodes = get_used_nodes(problem, design_rep)
     design_angle = get_design_angle(problem, design_rep)
-    vol_frac = eval_volfrac(problem, design_rep)
-    stiff = eval_stiffness(problem, design_rep)
-    # print('NUM STIFF:', len(stiff))
-    # Convert to text with newline separating each metric
-    metrics_text = f'Truss Members: {num_members}\n' \
-                   f'Non-Overlapping Truss Members: {num_members_no_overlaps}\n' \
-                   f'Truss Nodes: {used_nodes}\n' \
-                   f'Truss Angle: {design_angle:.2f} deg\n-----\n' \
-                   f'Youngs Modulus: {problem["youngs_modulus"]} Pa (N/m^2)\n' \
-                   f'Member Radii: {problem["member_radii"]} m\n' \
-                   f'Volume Fraction: {vol_frac:.8f}\n'
+    vol_frac = eval_volfrac(problem, design_rep, normalize=False)
+    stiff, extra_info = eval_stiffness(problem, design_rep, normalize=False, verbose=True)
+
+    metrics = [
+        f'Truss Members: {num_members}',
+        f'Non-Overlapping Truss Members: {num_members_no_overlaps}',
+        f'Truss Nodes: {used_nodes}',
+        f'Truss Angle: {design_angle:.2f} deg',
+        '-----',
+        f'Youngs Modulus: {problem["youngs_modulus"]:.2e} Pa (N/m^2)',
+        f'Member Radii: {problem["member_radii"]} m',
+        f'Volume Fraction: {vol_frac:.3f}',
+    ]
+
+    stiffness_metrics = []
     for idx, s in enumerate(stiff):
-        metrics_text += f'Stiffness (load{idx + 1}): {s:.2f} N/m\n'
+        load_cond_metrics = ['-----']
+        load_cond_metrics.append(f'Load Condition {idx + 1}')
+        load_cond_metrics.append(f'Stiffness: {s:.2e} N/m')
+        if len(extra_info) != 0:
+            info_dict = extra_info[idx]
+            for key, val in info_dict.items():
+                load_cond_metrics.append(f'{key}: {val}')
+            stiffness_metrics.extend(load_cond_metrics)
+    metrics.extend(stiffness_metrics)
+    metrics_text = '\n'.join(metrics)
+
+
     return metrics_text
 
 # ------------------------------

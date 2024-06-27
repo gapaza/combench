@@ -1,9 +1,9 @@
 import numpy as np
-from scipy.spatial import KDTree
-from combench.models.truss.stiffness.generateNC import generateNC
+from scipy.spatial import KDTree, cKDTree
 import time
 from copy import deepcopy
 import config
+import math
 
 
 def vox_space(problem, connectivity_array, resolution=100):
@@ -49,12 +49,22 @@ def vox_space(problem, connectivity_array, resolution=100):
     x_min, x_max = min(node_x_vals) - radius, max(node_x_vals) + radius
     y_min, y_max = min(node_y_vals) - radius, max(node_y_vals) + radius
 
-    # voxel_size = depth / 10
-    # voxel_size = width / resolution
-    voxel_width = width / resolution
-    voxel_height = height / resolution
-    voxel_depth = depth / resolution
-    # print('Voxel Sizes:', voxel_width, voxel_height, voxel_depth)
+    # --- Voxel Grid
+    # w_res = min(int(width / (radius*0.5)), resolution)
+    # h_res = min(int(height / (radius*0.5)), resolution)
+    # d_res = min(25, resolution)
+
+    w_res = resolution
+    h_res = resolution
+    d_res = resolution
+
+
+    voxel_width = width / w_res
+    voxel_height = height / h_res
+    voxel_depth = depth / d_res
+
+
+    # print('Voxel Sizes:', w_res, h_res, d_res)
     x, y, z = np.meshgrid(
         # np.arange(x_1, x_2, voxel_width),
         # np.arange(y_1, y_2, voxel_height),
@@ -68,7 +78,8 @@ def vox_space(problem, connectivity_array, resolution=100):
     # print('Number of Voxels:', len(voxel_centers))
 
     # Use a KDTree for efficient distance queries
-    tree = KDTree(voxel_centers)
+    # tree = KDTree(voxel_centers)
+    tree = cKDTree(voxel_centers)
     intersected_voxels = set()
 
     all_points = []
@@ -79,9 +90,10 @@ def vox_space(problem, connectivity_array, resolution=100):
         length = np.linalg.norm(direction)
         direction = direction / length
 
-        # step_len = radius / 10
-        # num_steps = math.floor(length / step_len)
-        num_steps = 100
+        step_len = radius / 10
+        num_steps = math.floor(length / step_len)
+        # print('NUM STEPS:', num_steps)
+        num_steps = min(num_steps, 100)
         step_len = length / num_steps
         for i in range(num_steps):
             point = start_node + i * step_len * direction
@@ -199,39 +211,39 @@ def voxelize_space(radius, sidelen, nodal_coords, connectivity_array, resolution
 
 
 
-if __name__ == '__main__':
-    sidenum = 3
-    num_vars = config.sidenum_nvar_map[sidenum]
-    radius = 0.1
-    sidelen = 1  # length of the side of the truss (not a single truss)
-
-
-    # NC = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])  # Nodal coordinates
-    # CA = [[1, 2], [2, 3], [3, 4], [4, 1], [1, 3], [2, 4]]  # Connectivity array
-
-    NC = generateNC(sidelen, sidenum)
-    print(NC)
-
-    CA = np.array([
-        [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9],
-        [2, 3], [2, 4], [2, 5], [2, 6], [2, 7], [2, 8], [2, 9],
-        [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9],
-        [4, 5], [4, 6], [4, 7], [4, 8], [4, 9],
-        [5, 6], [5, 7], [5, 8], [5, 9],
-        [6, 7], [6, 8], [6, 9],
-        [7, 8], [7, 9],
-        [8, 9],
-    ])  # Connectivity array
-
-
-    curr_time = time.time()
-    volume_fraction = voxelize_space(radius, sidelen, NC, CA, resolution=100)
-    print('Volume Fraction:', volume_fraction)
-    print('Time taken:', time.time() - curr_time)
-
-    # 0.015307337294603601
-
-    # print(f"Volume Fraction of the Truss Structure: {volume_fraction:.6f}")
+# if __name__ == '__main__':
+#     sidenum = 3
+#     num_vars = config.sidenum_nvar_map[sidenum]
+#     radius = 0.1
+#     sidelen = 1  # length of the side of the truss (not a single truss)
+#
+#
+#     # NC = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])  # Nodal coordinates
+#     # CA = [[1, 2], [2, 3], [3, 4], [4, 1], [1, 3], [2, 4]]  # Connectivity array
+#
+#     NC = generateNC(sidelen, sidenum)
+#     print(NC)
+#
+#     CA = np.array([
+#         [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9],
+#         [2, 3], [2, 4], [2, 5], [2, 6], [2, 7], [2, 8], [2, 9],
+#         [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9],
+#         [4, 5], [4, 6], [4, 7], [4, 8], [4, 9],
+#         [5, 6], [5, 7], [5, 8], [5, 9],
+#         [6, 7], [6, 8], [6, 9],
+#         [7, 8], [7, 9],
+#         [8, 9],
+#     ])  # Connectivity array
+#
+#
+#     curr_time = time.time()
+#     volume_fraction = voxelize_space(radius, sidelen, NC, CA, resolution=100)
+#     print('Volume Fraction:', volume_fraction)
+#     print('Time taken:', time.time() - curr_time)
+#
+#     # 0.015307337294603601
+#
+#     # print(f"Volume Fraction of the Truss Structure: {volume_fraction:.6f}")
 
 
 

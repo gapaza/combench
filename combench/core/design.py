@@ -52,7 +52,7 @@ class Design(ABC):
         return ''.join([str(bit) for bit in self.vector])
 
     def get_design_json(self):
-        return {'vector': self.vector, 'objectives': self.objectives}
+        return {'vector': self.get_design_str(), 'objectives': self.objectives}
 
 
 

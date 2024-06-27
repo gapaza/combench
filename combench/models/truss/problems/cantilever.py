@@ -2,6 +2,25 @@ from combench.models.truss.problems.abstract_problem import AbstractProblem
 import numpy as np
 from copy import deepcopy
 import random
+import math
+
+dcl = math.sqrt(2) / 2
+
+all_node_load_conds = [
+    [-1, 0],
+    [0, -1],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    # [1*dcl, 1*dcl],
+    # [-1*dcl, -1*dcl],
+    # [1*dcl, -1*dcl],
+    # [-1*dcl, 1*dcl],
+]
+
 
 
 
@@ -39,7 +58,7 @@ class Cantilever(AbstractProblem):
 
 
 
-    # This generates cantileve problems where the mesh and fixed nodes are static, and the load conditions are random
+    # This generates cantilever problems where the mesh and fixed nodes are static, and the load conditions are random
     @staticmethod
     def type_1(params):
         x_range = params['x_range']
@@ -86,14 +105,7 @@ class Cantilever(AbstractProblem):
         load_conds_enum = []
         for idx in load_conds_idx[0]:
             load_cond_temp = np.zeros_like(load_conds)
-            nodal_conds = [
-                [-1, 0],
-                [0, -1],
-                [1, 0],
-                [0, 1],
-                [1, 1],
-                [-1, -1]
-            ]
+            nodal_conds = deepcopy(all_node_load_conds)
             for i, cond in enumerate(nodal_conds):
                 load_cond_temp[idx] = cond
                 load_conds_enum.append(deepcopy(load_cond_temp))
@@ -173,30 +185,43 @@ class Cantilever(AbstractProblem):
 
 
 if __name__ == '__main__':
-    problem = Cantilever.get_problem(
-        None,
-        x_range=4,
-        y_range=3,
-        x_res=4,
-        y_res=3,
-        radii=0.2,
-        y_modulus=210e9
-    )
-    from combench.models.truss import rep
-    # design_rep = rep.grid_design_sample(problem)
-    # design_rep = [1 for x in range(rep.get_num_bits(problem))]
+    from combench.models import truss
+    problem_set = Cantilever.type_1_enum({
+        'x_range': 3,
+        'y_range': 3,
+        'x_res': 3,
+        'y_res': 3,
+        'radii': 0.2,
+        'y_modulus': 210e9
+    })
+    val_problem_indices = [5, 8, 12, 30]
+    train_problem_set = [problem_set[i] for i in range(len(problem_set)) if i not in val_problem_indices]
+    val_problem_set = [problem_set[i] for i in val_problem_indices]
+    problem = val_problem_set[3]
+    truss.set_norms(problem)
 
-    # design_str = '101000100000011000001001010000001101101001001011010001000001001100'
-    # design_rep = [int(x) for x in design_str]
-
-    design_rep = [int(1) for x in range(rep.get_num_bits(problem))]
-    design_rep = rep.remove_overlapping_members(problem, design_rep)
-
-    # for idx, node in enumerate(problem['nodes']):
-    #     print(f'Node {idx}:', rep.get_node_connections(problem, design_rep, idx))
+    design_rep = [int(1) for x in range(truss.rep.get_num_bits(problem))]
+    # design_rep = [[0, 8], [2, 6]]
+    truss.rep.viz(problem, design_rep, f'problems/{Cantilever.__name__}2.png')
 
 
-    rep.viz(problem, design_rep, f'problems/{Cantilever.__name__}.png')
+
+
+    # from combench.models.truss import rep
+    # # design_rep = rep.grid_design_sample(problem)
+    # # design_rep = [1 for x in range(rep.get_num_bits(problem))]
+    #
+    # # design_str = '101000100000011000001001010000001101101001001011010001000001001100'
+    # # design_rep = [int(x) for x in design_str]
+    #
+    # design_rep = [int(1) for x in range(rep.get_num_bits(problem))]
+    # design_rep = rep.remove_overlapping_members(problem, design_rep)
+    #
+    # # for idx, node in enumerate(problem['nodes']):
+    # #     print(f'Node {idx}:', rep.get_node_connections(problem, design_rep, idx))
+    #
+    #
+    # rep.viz(problem, design_rep, f'problems/{Cantilever.__name__}.png')
 
 
 

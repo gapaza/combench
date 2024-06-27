@@ -15,9 +15,8 @@ class Algorithm(ABC):
         self.population = population
         self.nfe = 0
         self.max_nfe = max_nfe
-        self.run_info = {
-
-        }
+        self.curr_epoch = 0
+        self.run_info = {}
 
         # Save
         self.run_name = run_name
@@ -30,6 +29,7 @@ class Algorithm(ABC):
         pass
 
     def record(self):
+        print(self.curr_epoch, end=' | ')
         for key, value in self.run_info.items():
             if isinstance(value, list):
                 print("%s: %.5f" % (key, value[-1]), end=' | ')
@@ -107,10 +107,10 @@ class MultiTaskAlgorithm(ABC):
                 print("%s: %.5f" % (key, value[-1]), end=' | ')
             else:
                 print("%s: %.5f" % (key, value), end=' | ')
-        self.populations[-1].prune()
-        self.populations[-1].record()
+        self.populations[0].prune()
+        self.populations[0].record()
         if self.val_run is True:
-            print('nfe:', self.nfe, "hv: %.5f" % self.populations[-1].hv[-1])
+            print('nfe:', self.nfe, "hv: %.5f" % self.populations[0].hv[-1])
         else:
             print('')
 

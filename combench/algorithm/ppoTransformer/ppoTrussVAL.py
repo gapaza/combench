@@ -4,15 +4,16 @@ import numpy as np
 import os
 import tensorflow as tf
 from combench.core.algorithm import Algorithm
-from combench.algorithm.nn.binaryDecoder import get_models
+from combench.algorithm.nn.trussDecoder import get_models
 from combench.algorithm import discounted_cumulative_sums
 import random
 import time
-import concurrent.futures
+import config
 
 # ------- Run name
-save_name = 'truss-3x3-cantilever-ppo'
-metrics_num = 1
+load_name = 'cantilever-4x4-pretrain-50res-flex1'
+save_name = 'cantilever-4x4-pretrain-50res-flex-val'
+metrics_num = 10
 
 # ------- Sampling parameters
 num_weight_samples = 4  # 4
@@ -24,25 +25,23 @@ task_epochs = 800
 max_nfe = 10000
 clip_ratio = 0.2
 target_kl = 0.005
-entropy_coef = 0.08
+entropy_coef = 0.04
 
 # -------- Problem
 opt_dir = ['max', 'min']
 use_constraints = False
 from combench.models import truss
-from combench.models.truss.TrussModel2 import TrussModel2 as Model
-from combench.models.truss import Cantilever
+from combench.models.truss.eval_process import EvaluationProcessManager
+from combench.models.truss.TrussModel import TrussModel as Model
 from combench.models.truss.nsga2 import TrussPopulation as Population
 from combench.models.truss.nsga2 import TrussDesign as Design
-v_problem = Cantilever.type_1({
-    'x_range': 3,
-    'y_range': 3,
-    'x_res': 3,
-    'y_res': 3,
-    'radii': 0.2,
-    'y_modulus': 210e9
-})
-truss.set_norms(v_problem)
+from combench.models.truss import train_problems, val_problems
+for p in val_problems:
+    truss.set_norms(p)
+v_problem = val_problems[0]
+
+
+
 
 import multiprocessing as mp
 mp.set_start_method('fork', force=True)
@@ -82,7 +81,7 @@ class UnconstrainedPPO(Algorithm):
 
         # Objective Weights
         num_keys = 9
-        self.objective_weights = list(np.linspace(0.00, 1.0, num_keys))
+        self.objective_weights = list(np.linspace(0.05, 0.95, num_keys))
 
         # Optimizer parameters
         self.actor_learning_rate = 0.0001  # 0.0001
@@ -97,7 +96,7 @@ class UnconstrainedPPO(Algorithm):
         self.num_vars = truss.rep.get_num_bits(self.problem.problem_formulation)
         self.cond_vars = 1  # Just objective weight for now
 
-        self.actor, self.critic = get_models(self.num_vars, self.cond_vars, self.actor_path, self.critic_path)
+        self.actor, self.critic = get_models(self.actor_path, self.critic_path)
 
         # PPO Parameters
         self.gamma = 0.99
@@ -116,6 +115,9 @@ class UnconstrainedPPO(Algorithm):
         self.run_info['kl'] = []
         self.run_info['entropy'] = []
 
+        # Evaluation Manager
+        self.eval_manager = EvaluationProcessManager(32)
+
     def run(self):
         print('Running PPO')
 
@@ -130,21 +132,27 @@ class UnconstrainedPPO(Algorithm):
                 self.plot_metrics(['return', 'c_loss', 'kl', 'entropy'], sn=metrics_num)
 
     def get_cond_vars(self):
-        weight_samples = []
+        problem_samples_idx = [0]
+        problem_samples = [self.problem]
+        population_samples = [self.population]
         weight_samples = random.sample(self.objective_weights, num_weight_samples)
 
         # Construct conditioning tensor
         cond_vars = []
         weight_samples_all = []
+        p_encoding_samples_all = []
         for weight in weight_samples:
             sample_vars = [weight]
             cond_vars.append(sample_vars)
             weight_samples_all.append(weight)
+            p_encoding_samples_all.append(self.problem.get_encoding())
 
         weight_samples_all = [element for element in weight_samples_all for _ in range(repeat_size)]
         cond_vars = [element for element in cond_vars for _ in range(repeat_size)]
+        p_encoding_samples_all = [element for element in p_encoding_samples_all for _ in range(repeat_size)]
+        p_encoding_tensor = tf.convert_to_tensor(p_encoding_samples_all, dtype=tf.float32)
         cond_vars_tensor = tf.convert_to_tensor(cond_vars, dtype=tf.float32)
-        return cond_vars_tensor, weight_samples_all
+        return cond_vars_tensor, weight_samples_all, p_encoding_tensor
 
     def run_epoch(self):
         new_designs = []
@@ -159,12 +167,12 @@ class UnconstrainedPPO(Algorithm):
         critic_observation_buffer = [[] for x in range(self.mini_batch_size)]
 
         # Get conditioning variables
-        cond_vars_tensor, weight_samples_all = self.get_cond_vars()
+        cond_vars_tensor, weight_samples_all, p_encoding_tensor = self.get_cond_vars()
 
         # Sample actions
         sample_start_time = time.time()
         for t in range(self.num_vars):
-            action_log_prob, action, all_action_probs = self.sample_actor(observation, cond_vars_tensor)  # returns shape: (batch,) and (batch,)
+            action_log_prob, action, all_action_probs = self.sample_actor(observation, cond_vars_tensor, p_encoding_tensor)  # returns shape: (batch,) and (batch,)
             action_log_prob = action_log_prob.numpy().tolist()
 
             observation_new = deepcopy(observation)
@@ -225,7 +233,7 @@ class UnconstrainedPPO(Algorithm):
         # -------------------------------------
 
         # --- SINGLE CRITIC PREDICTION --- #
-        value_t = self.sample_critic(critic_observation_buffer, cond_vars_tensor)
+        value_t = self.sample_critic(critic_observation_buffer, cond_vars_tensor, p_encoding_tensor)
         value_t = value_t.numpy().tolist()  # (30, 31)
         for idx, value in zip(range(self.mini_batch_size), value_t):
             last_reward = value[-1]
@@ -278,7 +286,7 @@ class UnconstrainedPPO(Algorithm):
                 action_tensor,
                 logprob_tensor,
                 advantage_tensor,
-                cond_vars_tensor
+                cond_vars_tensor, p_encoding_tensor
             )
             if kl > 1.5 * self.target_kl:
                 # Early Stopping
@@ -296,7 +304,7 @@ class UnconstrainedPPO(Algorithm):
             value_loss = self.train_critic(
                 critic_observation_tensor,
                 return_tensor,
-                cond_vars_tensor,
+                cond_vars_tensor, p_encoding_tensor
             )
         value_loss = value_loss.numpy()
 
@@ -313,8 +321,10 @@ class UnconstrainedPPO(Algorithm):
     # -------------------------------------
 
     def calc_reward_batch(self, designs, weights):
+        e_problems = [self.problem.problem_formulation for _ in range(len(designs))]
+        e_designs = designs
+        objectives = self.eval_manager.evaluate(e_problems, e_designs)
 
-        objectives = self.problem.evaluate_batch(designs)
         returns = []
         for idx, design in enumerate(designs):
             objs = list(objectives[idx])
@@ -393,21 +403,22 @@ class UnconstrainedPPO(Algorithm):
     # Actor-Critic Functions
     # -------------------------------------
 
-    def sample_actor(self, observation, cross_obs):
+    def sample_actor(self, observation, cross_obs, p_encoding):
         inf_idx = len(observation[0]) - 1  # all batch elements have the same length
         observation_input = deepcopy(observation)
         observation_input = tf.convert_to_tensor(observation_input, dtype=tf.float32)
         inf_idx = tf.convert_to_tensor(inf_idx, dtype=tf.int32)
-        return self._sample_actor(observation_input, cross_obs, inf_idx)
+        return self._sample_actor(observation_input, cross_obs, inf_idx, p_encoding)
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, None)
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, 1)
-        tf.TensorSpec(shape=(), dtype=tf.int32)
+        tf.TensorSpec(shape=(), dtype=tf.int32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
-    def _sample_actor(self, observation_input, cross_input, inf_idx):
+    def _sample_actor(self, observation_input, cross_input, inf_idx, p_encoding):
         # print('sampling actor', inf_idx)
-        pred_probs = self.actor([observation_input, cross_input])
+        pred_probs = self.actor([observation_input, cross_input, p_encoding])  # shape (batch, seq_len, 2)
 
         # Batch sampling
         all_token_probs = pred_probs[:, inf_idx, :]  # shape (batch, 2)
@@ -421,24 +432,22 @@ class UnconstrainedPPO(Algorithm):
         actions_log_prob = next_bit_probs  # (batch,)
         return actions_log_prob, actions, all_token_probs
 
-    def sample_critic(self, observation, parent_obs):
+    def sample_critic(self, observation, parent_obs, p_encoding):
         inf_idx = len(observation[0]) - 1
         observation_input = tf.convert_to_tensor(observation, dtype=tf.float32)
         inf_idx = tf.convert_to_tensor(inf_idx, dtype=tf.int32)
-        return self._sample_critic(observation_input, parent_obs, inf_idx)
+        return self._sample_critic(observation_input, parent_obs, inf_idx, p_encoding)
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
-        tf.TensorSpec(shape=(), dtype=tf.int32)
+        tf.TensorSpec(shape=(), dtype=tf.int32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
-    def _sample_critic(self, observation_input, parent_input, inf_idx):
-        t_value = self.critic([observation_input, parent_input])  # (batch, seq_len, 2)
+    def _sample_critic(self, observation_input, parent_input, inf_idx, p_encoding):
+        t_value = self.critic([observation_input, parent_input, p_encoding])  # (batch, seq_len, 2)
         t_value = t_value[:, :, 0]
         return t_value
-        # t_value_stiff = t_value[:, :, 0]  # (batch, 1)
-        # t_value_vol = t_value[:, :, 1]  # (batch, 1)
-        # return t_value_stiff, t_value_vol
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
@@ -446,6 +455,7 @@ class UnconstrainedPPO(Algorithm):
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
     def train_actor(
             self,
@@ -453,10 +463,11 @@ class UnconstrainedPPO(Algorithm):
             action_buffer,
             logprobability_buffer,
             advantage_buffer,
-            parent_buffer
+            parent_buffer,
+            p_encoding_buffer,
     ):
         with tf.GradientTape() as tape:
-            pred_probs = self.actor([observation_buffer, parent_buffer])  # shape: (batch, seq_len, 2)
+            pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer])  # shape: (batch, seq_len, 2)
             pred_log_probs = tf.math.log(pred_probs)  # shape: (batch, seq_len, 2)
             logprobability = tf.reduce_sum(
                 tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
@@ -488,7 +499,7 @@ class UnconstrainedPPO(Algorithm):
         self.actor_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
 
         #  KL Divergence
-        pred_probs = self.actor([observation_buffer, parent_buffer])
+        pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer])
         pred_log_probs = tf.math.log(pred_probs)
         logprobability = tf.reduce_sum(
             tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
@@ -504,17 +515,19 @@ class UnconstrainedPPO(Algorithm):
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
     def train_critic(
             self,
             observation_buffer,
             return_buffer,
             parent_buffer,
+            p_encoding_buffer
     ):
 
         with tf.GradientTape() as tape:  # Record operations for automatic differentiation.
             pred_values = self.critic(
-                [observation_buffer, parent_buffer])  # (batch, seq_len, 2)
+                [observation_buffer, parent_buffer, p_encoding_buffer])  # (batch, seq_len, 2)
 
             # Value Loss (mse)
             value_loss = tf.reduce_mean((return_buffer - pred_values) ** 2)
@@ -526,7 +539,9 @@ class UnconstrainedPPO(Algorithm):
 
 
 
+
 if __name__ == '__main__':
+
 
     # Problem
     problem = Model(v_problem)
@@ -537,7 +552,10 @@ if __name__ == '__main__':
     pop = Population(pop_size, ref_point, problem)
 
     # PPO
-    ppo = UnconstrainedPPO(problem, pop, max_nfe, run_name=save_name)
+    actor_path, critic_path = None, None
+    actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_8000')
+    critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_8000')
+    ppo = UnconstrainedPPO(problem, pop, max_nfe, actor_path=actor_path, critic_path=critic_path, run_name=save_name)
     ppo.run()
 
 

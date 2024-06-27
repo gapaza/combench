@@ -12,50 +12,43 @@ from combench.algorithm import discounted_cumulative_sums
 import random
 
 # ------- Run name
-save_name = 'truss-3x3-cantilever-ppo-mt'
-load_name = 'truss-3x3-cantilever-ppo-mt'
-metrics_num = 3
+r_num = 1
+save_name = 'cantilever-4x4-pretrain-50res-flex-' + str(r_num)
+load_name = 'cantilever-4x4-pretrain-50res-flex-' + str(r_num)
+metrics_num = 0
 save_freq = 50
+plot_freq = 20
+
+NUM_PROCS = 3
+DROPOUT = False
 
 # ------- Sampling parameters
-num_problem_samples = 4  # 1
-num_weight_samples = 4  # 1
-repeat_size = 2  # 3
-global_mini_batch_size = num_problem_samples * repeat_size * num_weight_samples
+num_problem_samples = 2  # 1
+num_weight_samples = 9  # 1
+repeat_size = 1  # 3
+global_mini_batch_size = num_problem_samples * repeat_size * num_weight_samples  # 4 * 4 * 4 = 64
 
 # -------- Training Parameters
 task_epochs = 800
 max_nfe = 1e15
 clip_ratio = 0.2
 target_kl = 0.005
-entropy_coef = 0.08
+entropy_coef = 0.04
 
 # -------- Problem
 opt_dir = ['max', 'min']
 use_constraints = False
 from combench.models import truss
-from combench.models.truss.TrussModel2 import TrussModel2 as Model
-from combench.models.truss import Cantilever
+from combench.models.truss.eval_process import EvaluationProcessManager
+from combench.models.truss.TrussModel import TrussModel as Model
 from combench.models.truss.nsga2 import TrussPopulation as Population
 from combench.models.truss.nsga2 import TrussDesign as Design
-problem_set = Cantilever.type_1_enum({
-    'x_range': 3,
-    'y_range': 3,
-    'x_res': 3,
-    'y_res': 3,
-    'radii': 0.2,
-    'y_modulus': 210e9
-})
-for p in problem_set:
+from combench.models.truss import train_problems, val_problems
+for p in train_problems:
     truss.set_norms(p)
 
-print('NUM PROBLEMS:', len(problem_set))  # 30 problems
-val_problem_indices = [5, 12, 19, 26]
-train_problem_set = [problem_set[i] for i in range(len(problem_set)) if i not in val_problem_indices]
-val_problem_set = [problem_set[i] for i in val_problem_indices]
-
 # -------- Set random seed for reproducibility
-seed_num = 2
+seed_num = 3
 random.seed(seed_num)
 tf.random.set_seed(seed_num)
 
@@ -86,7 +79,7 @@ class TrussPPO(MultiTaskAlgorithm):
 
         # Objective Weights
         num_keys = 9
-        self.objective_weights = list(np.linspace(0.00, 1.0, num_keys))
+        self.objective_weights = list(np.linspace(0.05, 0.95, num_keys))
 
         # PPO Parameters
         self.gamma = 0.99
@@ -113,6 +106,9 @@ class TrussPPO(MultiTaskAlgorithm):
         self.run_info['kl'] = []
         self.run_info['entropy'] = []
 
+        # Evaluation Manager
+        self.eval_manager = EvaluationProcessManager(32)
+
     def save_models(self, epoch=None):
         if epoch:
             actor_save = self.actor_pretrain_save_path + '_' + str(epoch)
@@ -136,8 +132,8 @@ class TrussPPO(MultiTaskAlgorithm):
             # print('Time for record:', time.time() - curr_time)
             curr_time = time.time()
             self.curr_epoch += 1
-            if self.curr_epoch % 10 == 0:
-                self.populations[self.last_updated_task].plot_hv(self.save_dir)
+            if self.curr_epoch % plot_freq == 0:
+                self.populations[0].plot_hv(self.save_dir)
                 self.populations[self.last_updated_task].plot_population(self.save_dir)
                 self.plot_metrics(['return', 'c_loss', 'kl', 'entropy', 'avg_dist'], sn=metrics_num)
                 # print('Time for plotting:', time.time() - curr_time)
@@ -151,7 +147,8 @@ class TrussPPO(MultiTaskAlgorithm):
         problem_samples = [self.problems[idx] for idx in problem_samples_idx]
         population_samples = [self.populations[idx] for idx in problem_samples_idx]
         weight_samples = random.sample(self.objective_weights, num_weight_samples)
-        self.last_updated_task = random.choice(problem_samples_idx)
+        # weight_samples[0] = self.objective_weights[0]
+        self.last_updated_task = problem_samples_idx[0]
 
         # Construct conditioning tensor
         cond_vars = []
@@ -159,6 +156,7 @@ class TrussPPO(MultiTaskAlgorithm):
         problem_samples_all = []
         population_samples_all = []
         p_encoding_samples_all = []
+
         for weight in weight_samples:
             for idx, p in enumerate(problem_samples):
                 sample_vars = [weight]
@@ -239,46 +237,50 @@ class TrussPPO(MultiTaskAlgorithm):
                 #     all_total_rewards.append(reward)
 
                 # TODO: Parallel evals
-                problem_to_design = {}  # Maps problems to the indices of their designs
-                for idx, design in enumerate(designs):
-                    problem = problem_samples_all[idx]
-                    problem_id = problem.model_id
-                    if problem_id not in problem_to_design:
-                        problem_to_design[problem_id] = [problem, []]
-                    problem_to_design[problem_id][1].append(idx)
-                problem_keys = list(problem_to_design.keys())
-                reconstructed_evals = [None for _ in range(len(designs))]
-
-                p_queues_all = []
-                for p_key in problem_keys:  # Batch evaluate each problem's designs
-                    designs_to_eval_idx = problem_to_design[p_key][1]
-                    designs_to_eval = [designs[idx] for idx in designs_to_eval_idx]
-                    problem = problem_to_design[p_key][0]
-                    p_queues = problem.evaluate_batch_async(designs_to_eval)
-                    p_queues_all.append(p_queues)
-                for idx, p_queues in enumerate(p_queues_all):
-                    evals = []
-                    for p_queue in p_queues:
-                        evals += p_queue.get()
-                    p_key = problem_keys[idx]
-                    designs_to_eval_idx = problem_to_design[p_key][1]
-                    for idx, eval in enumerate(evals):
-                        reconstructed_evals[designs_to_eval_idx[idx]] = eval
-                objectives = reconstructed_evals
-
+                # problem_to_design = {}  # Maps problems to the indices of their designs
+                # for idx, design in enumerate(designs):
+                #     problem = problem_samples_all[idx]
+                #     problem_id = problem.model_id
+                #     if problem_id not in problem_to_design:
+                #         problem_to_design[problem_id] = [problem, []]
+                #     problem_to_design[problem_id][1].append(idx)
+                # problem_keys = list(problem_to_design.keys())
+                # reconstructed_evals = [None for _ in range(len(designs))]
+                # p_queues_all = []
                 # for p_key in problem_keys:  # Batch evaluate each problem's designs
                 #     designs_to_eval_idx = problem_to_design[p_key][1]
                 #     designs_to_eval = [designs[idx] for idx in designs_to_eval_idx]
                 #     problem = problem_to_design[p_key][0]
-                #     evals = problem.evaluate_batch(designs_to_eval)
+                #     p_queues = problem.evaluate_batch_async(designs_to_eval)
+                #     p_queues_all.append(p_queues)
+                # for idx, p_queues in enumerate(p_queues_all):
+                #     evals = []
+                #     for p_queue in p_queues:
+                #         evals += p_queue.get()
+                #     p_key = problem_keys[idx]
+                #     designs_to_eval_idx = problem_to_design[p_key][1]
                 #     for idx, eval in enumerate(evals):
                 #         reconstructed_evals[designs_to_eval_idx[idx]] = eval
                 # objectives = reconstructed_evals
+                # evals = self.calc_reward_batch(designs, weight_samples_all, objectives, problem_samples_all, population_samples_all)
+                # for idx, (reward, objs) in enumerate(evals):
+                #     all_rewards[idx].append(reward)
+                #     all_total_rewards.append(reward)
 
+                # TODO: Eval Manager evals
+                e_problems, e_designs = [], []
+                for idx, design in enumerate(designs):
+                    pf = problem_samples_all[idx].problem_formulation
+                    e_problems.append(pf)
+                    e_designs.append(design)
+                objectives = self.eval_manager.evaluate(e_problems, e_designs)
                 evals = self.calc_reward_batch(designs, weight_samples_all, objectives, problem_samples_all, population_samples_all)
-                for idx, (reward, objs) in enumerate(evals):
+                for idx, (reward, design_obj) in enumerate(evals):
                     all_rewards[idx].append(reward)
                     all_total_rewards.append(reward)
+
+
+
             else:
                 done = False
                 reward = 0.0
@@ -460,7 +462,6 @@ class TrussPPO(MultiTaskAlgorithm):
         return returns
 
 
-
     def calc_reward(self, design_bitstr, problem, population, weight):
 
         design_bitlst = [int(bit) for bit in design_bitstr]
@@ -524,7 +525,7 @@ class TrussPPO(MultiTaskAlgorithm):
     ])
     def _sample_actor(self, observation_input, cross_input, inf_idx, p_encoding):
         # print('sampling actor', inf_idx)
-        pred_probs = self.actor([observation_input, cross_input, p_encoding])  # shape (batch, seq_len, 2)
+        pred_probs = self.actor([observation_input, cross_input, p_encoding], training=DROPOUT)  # shape (batch, seq_len, 2)
 
         # Batch sampling
         all_token_probs = pred_probs[:, inf_idx, :]  # shape (batch, 2)
@@ -573,7 +574,7 @@ class TrussPPO(MultiTaskAlgorithm):
             p_encoding_buffer,
     ):
         with tf.GradientTape() as tape:
-            pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer])  # shape: (batch, seq_len, 2)
+            pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer], training=DROPOUT)  # shape: (batch, seq_len, 2)
             pred_log_probs = tf.math.log(pred_probs)  # shape: (batch, seq_len, 2)
             logprobability = tf.reduce_sum(
                 tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
@@ -605,7 +606,7 @@ class TrussPPO(MultiTaskAlgorithm):
         self.actor_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
 
         #  KL Divergence
-        pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer])
+        pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer], training=DROPOUT)  # shape: (batch, seq_len, 2
         pred_log_probs = tf.math.log(pred_probs)
         logprobability = tf.reduce_sum(
             tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
@@ -652,11 +653,13 @@ if __name__ == '__main__':
 
     # Single-Task Training
     actor_path, critic_path = None, None
-    # actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_5000')
-    # critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_5000')
-    problems = [Model(problem) for problem in train_problem_set]
+    # actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_100')
+    # critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_100')
+    problems = [Model(deepcopy(problem), num_procs=NUM_PROCS) for problem in train_problems]
     # pops = [Population(pop_size, ref_point, problem)]
-    pops = [Population(pop_size, ref_point, problem) for problem in problems]
+    # pops = [Population(pop_size, ref_point, problem) for problem in problems]
+    pops = [Population(pop_size, ref_point, problem) for idx, problem in enumerate(problems)]
+
     ppo = TrussPPO(problems, pops, max_nfe, actor_path, critic_path, run_name=save_name)
     ppo.run()
 

@@ -4,7 +4,7 @@ import tensorflow as tf
 import config
 import keras_nlp
 import math
-from keras_nlp.layers import TransformerDecoder
+from keras_nlp.layers import TransformerDecoder, TransformerEncoder
 from keras_nlp.layers import TokenAndPositionEmbedding
 from keras_nlp.layers import SinePositionEncoding
 
@@ -14,14 +14,14 @@ from keras_nlp.layers import SinePositionEncoding
 # 2: 0-bit
 # 3: 1-bit
 
-actor_embed_dim = 32
+actor_embed_dim = 48
 actor_heads = 16
-actor_dense = 512
+actor_dense = 1024
 actor_dropout = 0.0
 
-critic_embed_dim = 32
+critic_embed_dim = 48
 critic_heads = 16
-critic_dense = 512
+critic_dense = 1024
 critic_dropout = 0.0
 
 # ------------------------------------
@@ -44,6 +44,7 @@ class TrussDecoder(tf.keras.Model):
 
         # Conditioning Vector Positional Encoding
         self.positional_encoding = SinePositionEncoding(name='positional_encoding')
+        self.node_positional_encoding = SinePositionEncoding(name='node_positional_encoding')
 
         # Token + Position embedding
         self.design_embedding_layer = TokenAndPositionEmbedding(
@@ -54,15 +55,16 @@ class TrussDecoder(tf.keras.Model):
         )
         
         # Node Embedding Layer
-        # self.node_hidden_1 = layers.Dense(self.embed_dim, activation='relu')
+        self.node_hidden_1 = layers.Dense(self.embed_dim, activation='relu')
         self.node_embedding_layer = layers.Dense(self.embed_dim, activation='linear')
+        # self.node_encoder = TransformerEncoder(self.embed_dim, self.num_heads, name='node_encoder')
 
         # Decoder Stack
         self.normalize_first = False
         self.decoder_1 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_1', dropout=actor_dropout)
         self.decoder_2 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_2', dropout=actor_dropout)
-        # self.decoder_3 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_3', dropout=actor_dropout)
-        # self.decoder_4 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_4', dropout=actor_dropout)
+        self.decoder_3 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_3', dropout=actor_dropout)
+        self.decoder_4 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_4', dropout=actor_dropout)
         # self.decoder_5 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_5', dropout=actor_dropout)
 
         # Design Prediction Head
@@ -81,12 +83,16 @@ class TrussDecoder(tf.keras.Model):
         # print('Weights:', weights.shape)
         # print('Nodes:', nodes.shape)
 
+        # batch = tf.shape(nodes)[0]
+        # nodes = tf.reshape(nodes, (batch, 1, -1))
+
         # 1.1 Embed nodes: (batch, 9, embed_dim)
-        # nodes = self.node_hidden_1(nodes)
+        nodes = self.node_hidden_1(nodes)
         nodes = self.node_embedding_layer(nodes)
+        # nodes = self.node_encoder(nodes, training=training)
 
         # 1.2 Weights: (batch, 1, embed_dim)
-        weight_seq = self.add_positional_encoding(weights, nodes)
+        weight_seq, nodes = self.add_positional_encoding(weights, nodes)
 
 
 
@@ -97,8 +103,8 @@ class TrussDecoder(tf.keras.Model):
         decoded_design = design_sequences_embedded
         decoded_design = self.decoder_1(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
         decoded_design = self.decoder_2(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
-        # decoded_design = self.decoder_3(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
-        # decoded_design = self.decoder_4(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
+        decoded_design = self.decoder_3(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
+        decoded_design = self.decoder_4(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
         # decoded_design = self.decoder_5(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True)
 
         # 4. Design Prediction Head
@@ -118,7 +124,12 @@ class TrussDecoder(tf.keras.Model):
         pos_enc = self.positional_encoding(weight_seq)
         weight_seq = weight_seq + pos_enc
 
-        return weight_seq
+        # For node embedding
+        pos_enc = self.node_positional_encoding(nodes)
+        nodes = nodes + pos_enc
+
+
+        return weight_seq, nodes
 
     def get_config(self):
         base_config = super().get_config()
@@ -149,6 +160,7 @@ class TrussDecoderCritic(tf.keras.Model):
 
         # Conditioning Vector Positional Encoding
         self.positional_encoding = SinePositionEncoding(name='positional_encoding')
+        self.node_positional_encoding = SinePositionEncoding(name='node_positional_encoding')
 
         # Token + Position embedding
         self.design_embedding_layer = TokenAndPositionEmbedding(
@@ -159,8 +171,9 @@ class TrussDecoderCritic(tf.keras.Model):
         )
 
         # Node Embedding Layer
-        # self.node_hidden_1 = layers.Dense(self.embed_dim, activation='relu')
+        self.node_hidden_1 = layers.Dense(self.embed_dim, activation='relu')
         self.node_embedding_layer = layers.Dense(self.embed_dim, activation='linear')
+        # self.node_encoder = TransformerEncoder(self.embed_dim, self.num_heads, name='node_encoder')
 
         # Decoder Stack
         self.normalize_first = False
@@ -174,12 +187,16 @@ class TrussDecoderCritic(tf.keras.Model):
     def call(self, inputs, training=False, mask=None):
         design_sequences, weights, nodes = inputs
 
+        # batch = tf.shape(nodes)[0]
+        # nodes = tf.reshape(nodes, (batch, 1, -1))
+
         # 1.1 Embed nodes: (batch, 9, embed_dim)
-        # nodes = self.node_hidden_1(nodes)
+        nodes = self.node_hidden_1(nodes)
         nodes = self.node_embedding_layer(nodes)
+        # nodes = self.node_encoder(nodes, training=training)
 
         # 1.2 Weights: (batch, 1, embed_dim)
-        weight_seq = self.add_positional_encoding(weights, nodes)
+        weight_seq, nodes = self.add_positional_encoding(weights, nodes)
 
         # 2. Embed design_sequences
         design_sequences_embedded = self.design_embedding_layer(design_sequences, training=training)
@@ -205,7 +222,11 @@ class TrussDecoderCritic(tf.keras.Model):
         pos_enc = self.positional_encoding(weight_seq)
         weight_seq = weight_seq + pos_enc
 
-        return weight_seq
+        # For node embedding
+        pos_enc = self.node_positional_encoding(nodes)
+        nodes = nodes + pos_enc
+
+        return weight_seq, nodes
 
     def get_config(self):
         base_config = super().get_config()
@@ -223,17 +244,18 @@ def get_models(checkpoint_path_actor=None, checkpoint_path_critic=None):
     design_len = config.num_vars
     conditioning_values = 1
     p_nodes = 9
+    node_vars = 6
 
     actor_model = TrussDecoder()
     decisions = tf.zeros((1, design_len))
     weights = tf.zeros((1, conditioning_values))
-    nodes = tf.zeros((1, p_nodes, 2))
+    nodes = tf.zeros((1, p_nodes, node_vars))
     actor_model([decisions, weights, nodes])
 
     critic_model = TrussDecoderCritic()
     decisions = tf.zeros((1, design_len + 1))
     weights = tf.zeros((1, conditioning_values))
-    nodes = tf.zeros((1, p_nodes, 2))
+    nodes = tf.zeros((1, p_nodes, node_vars))
     critic_model([decisions, weights, nodes])
 
     # Load Weights
@@ -241,6 +263,8 @@ def get_models(checkpoint_path_actor=None, checkpoint_path_critic=None):
         actor_model.load_weights(checkpoint_path_actor).expect_partial()
     if checkpoint_path_critic:
         critic_model.load_weights(checkpoint_path_critic).expect_partial()
+
+    actor_model.summary()
 
     return actor_model, critic_model
 

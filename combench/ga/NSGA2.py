@@ -136,9 +136,15 @@ class NSGA2:
             progress_bar.update(update_delta)
             progress_bar.set_postfix({'hv': self.population.hv[-1]})
 
+
+
+
         # Plot hv and population
+        print('PLOTTING POPULATION')
         self.population.plot_population(self.save_dir)
+        print('PLOTTING HV')
         self.population.plot_hv(self.save_dir)
+        print('FINISHED PLOTTING')
         results = [(nfe, hv) for nfe, hv in zip(self.population.nfes, self.population.hv)]
         return results
 

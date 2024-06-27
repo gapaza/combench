@@ -1,123 +1,130 @@
+import numpy as np
+import string
+import random
 import config
 import time
 import math
 
 
-from combench.models.truss.vol.TrussVolumeFraction import TrussVolumeFraction
-from combench.models.truss.stiffness.TrussStiffness import TrussStiffness
-from combench.models.truss import sidenum_nvar_map
+# from combench.models.truss.vol.TrussVolumeFraction import TrussVolumeFraction
+# from combench.models.truss.stiffness.TrussStiffness import TrussStiffness
+# from combench.models.truss import sidenum_nvar_map
 from combench.core.model import Model
 from combench.models.utils import random_binary_design
+from combench.models import truss
+import concurrent.futures
+from combench.models.truss.eval_process import EvaluationProcess
+import multiprocessing
+# Update to fork instead of spawn for multiprocessing
+
+
+def local_eval(params):
+    problem, design_rep = params
+    stiff_vals = truss.eval_stiffness(problem, design_rep, normalize=True)
+    stiff = stiff_vals[0] * -1.0  # maximize stiffness_old
+    volfrac = truss.eval_volfrac(problem, design_rep)
+    return stiff, volfrac
+
+
+NUM_PROCS = 1
 
 
 class TrussModel(Model):
 
-    def __init__(self, problem_formulation):
+    def __init__(self, problem_formulation, num_procs=1):
         super().__init__(problem_formulation)
-        self.sidenum = problem_formulation['sidenum']
-        self.y_modulus = problem_formulation['y_modulus']
-        self.member_radii = problem_formulation['member_radii']
-        self.side_length = problem_formulation['side_length']
         self.norms = self.load_norms()
         print('Norm values: {}'.format(self.norms))
+        self.procs = []
+        self.num_procs = num_procs
+
+    def init_procs(self):
+        # self.num_procs = NUM_PROCS
+        self.procs = []
+        for x in range(self.num_procs):
+            request_queue = multiprocessing.Queue()
+            response_queue = multiprocessing.Queue()
+            eval_proc = EvaluationProcess(request_queue, response_queue)
+            eval_proc.start()
+            self.procs.append([
+                eval_proc, request_queue, response_queue
+            ])
+
+    def close_procs(self):
+        for proc in self.procs:
+            proc[0].terminate()
+
+    def __del__(self):
+        self.close_procs()
+
 
     def load_norms(self):
+        if 'norms' in self.problem_formulation:
+            return self.problem_formulation['norms']
         if 'norms' in self.problem_store:
             return self.problem_store['norms']
 
-        # Calculate the norms
-        num_bits = sidenum_nvar_map[self.sidenum]
-        random_design = [1 for x in range(num_bits)]
-        evals = []
-        evals.append(self.evaluate(random_design, normalize=False))
-        max_vstiff = min([evals[i][0] for i in range(len(evals))])
-        max_volume_fraction = max([evals[i][1] for i in range(len(evals))])
-        max_vstiff_norm = abs(max_vstiff) * 1.1  # Add margin
-        max_volume_fraction_norm = max_volume_fraction * 1.1  # Add margin
-        self.problem_store['norms'] = [max_vstiff_norm, max_volume_fraction_norm]
+        truss.set_norms(self.problem_formulation)
+        norms = self.problem_formulation['norms']
+
+        self.problem_store['norms'] = norms
         self.save_problem_store()
-        return [max_vstiff_norm, max_volume_fraction_norm]
+        return norms
 
     def random_design(self):
-        num_bits = sidenum_nvar_map[self.sidenum]
-        return random_binary_design(num_bits)
+        return truss.rep.random_sample_1(self.problem_formulation)
 
     def evaluate(self, design, normalize=True):
-        y_modulus = self.y_modulus
-        member_radii = self.member_radii
-        side_length = self.side_length
-        v_stiff, volume_fraction, stiff_ratio = self._evaluate(design, y_modulus, member_radii, side_length)
+        stiff_vals = truss.eval_stiffness(self.problem_formulation, design, normalize=True)
+        stiff = stiff_vals[0] * -1.0  # maximize stiffness_old
+        volfrac = truss.eval_volfrac(self.problem_formulation, design)
+        return stiff, volfrac
 
-        if normalize is True:
-            if v_stiff == 0 and volume_fraction == 1:
-                return 0, 1
-            else:
-                v_stiff_norm, volume_fraction_norm = self.load_norms()
-                v_stiff /= v_stiff_norm
-                volume_fraction /= volume_fraction_norm
-        return v_stiff, volume_fraction
+    def get_encoding(self):
+        # Create a vector for each node with the following values:
+        # [x, y, dofx, dofy, fx, fy]
+        problem = self.problem_formulation
+        load_cond = problem['load_conds'][0]
+        node_vectors = []
+        for idx, node in enumerate(problem['nodes']):
+            node_dof = problem['nodes_dof'][idx]
+            node_load = load_cond[idx]
+            node_vector = np.array([
+                node[0], node[1], node_dof[0], node_dof[1], node_load[0], node_load[1]
+                # node_load[0], node_load[1]
+            ])
+            node_vectors.append(node_vector)
+        return node_vectors
 
-    def _evaluate(self, design_array, y_modulus, member_radii, side_length):
-
-        # 1. Calculate the volume fraction
-        curr_time = time.time()
-        vf_client = TrussVolumeFraction(self.sidenum, design_array, side_length=side_length)
-        design_conn_array = vf_client.design_conn_array
-        volume_fraction, feasibility_constraint, interaction_list = vf_client.evaluate(member_radii, side_length)
-        # volume_fraction, feasibility_constraint, interaction_list = 0, 0, 0
-
-        # print("Time taken for volume fraction: ", time.time() - curr_time)
-
-        # 2. Calculate the stiffness
-        curr_time = time.time()
-        results = TrussStiffness.evaluate(design_conn_array, self.sidenum, side_length, member_radii, y_modulus)
-        if results is None:
-            return 0, 1, 0
-        v_stiff, h_stiff, stiff_ratio = results
-
-        # Check if v_stiff is numpy nan
-        if math.isnan(v_stiff):
-            return 0, 1, 0
-
-        return -v_stiff, volume_fraction, stiff_ratio
-
-    def evaluate_decomp(self, design_array, y_modulus, member_radii, side_length):
-
-        # 1. Calculate the volume fraction
-        curr_time = time.time()
-        vf_client = TrussVolumeFraction(self.sidenum, design_array, side_length=side_length)
-        design_conn_array = vf_client.design_conn_array
-        volume_fraction, feasibility_constraint, interaction_list = vf_client.evaluate(member_radii, side_length)
-        new_nodes, new_design_conn_array = vf_client.get_intersections()
-        # volume_fraction, feasibility_constraint, interaction_list = 0, 0, 0
-
-        # print("Time taken for volume fraction: ", time.time() - curr_time)
-
-        # 2. Calculate the stiffness
-        curr_time = time.time()
-        results = TrussStiffness.evaluate_decomp(new_design_conn_array, self.sidenum, side_length, member_radii, y_modulus, new_nodes)
-        if results is None:
-            return 0, 0, 0, 0, 0
-        v_stiff, h_stiff, stiff_ratio = results
-        print("Time taken for stiffness: ", time.time() - curr_time)
-
-        return  v_stiff, h_stiff, stiff_ratio
+    def get_padded_encoding(self, pad_len):
+        encoding = self.get_encoding()
+        padding_mask = [1 for x in encoding]  # 1s where actual nodes are
+        padding_mask += [0 for x in range(pad_len - len(encoding))]
+        encoding += [[0 for x in range(6)] for x in range(pad_len - len(encoding))]
+        return encoding, padding_mask
 
 
-
-
-from combench.models.truss import problem1
+from combench.models.truss import Cantilever
 
 if __name__ == '__main__':
-
-
-    truss_model = TrussModel(problem1)
+    param_dict = {
+        'x_range': 3,
+        'y_range': 3,
+        'x_res': 3,
+        'y_res': 3,
+        'radii': 0.2,
+        'y_modulus': 210e9
+    }
+    problem = Cantilever.type_1(
+        param_dict
+    )
+    truss_model = TrussModel(problem)
 
 
     # design_str = '111010000010100010100000101010'
     # design_array = [int(bit) for bit in design_str]
-    design_array = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]
-
+    design_array = truss_model.random_design()
+    design_array = [1 for x in design_array]
     curr_time = time.time()
     objectives = truss_model.evaluate(design_array)
     print('Objectives:', objectives)
