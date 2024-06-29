@@ -14,14 +14,14 @@ from keras_nlp.layers import SinePositionEncoding
 # 2: 0-bit
 # 3: 1-bit
 
-actor_embed_dim = 48
-actor_heads = 16
-actor_dense = 1024
+actor_embed_dim = 32
+actor_heads = 8
+actor_dense = 2048
 actor_dropout = 0.0
 
-critic_embed_dim = 48
-critic_heads = 16
-critic_dense = 1024
+critic_embed_dim = 32
+critic_heads = 8
+critic_dense = 512
 critic_dropout = 0.0
 
 # ------------------------------------
@@ -36,7 +36,7 @@ class TrussDecoder(tf.keras.Model):
 
         # Variables
         self.vocab_size = 4
-        self.vocab_output_size = 2
+        self.vocab_output_size = 3  # Include stop token in variable length chromosome
         self.gen_design_seq_length = config.num_vars
         self.embed_dim = actor_embed_dim
         self.num_heads = actor_heads
@@ -63,8 +63,8 @@ class TrussDecoder(tf.keras.Model):
         self.normalize_first = False
         self.decoder_1 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_1', dropout=actor_dropout)
         self.decoder_2 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_2', dropout=actor_dropout)
-        self.decoder_3 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_3', dropout=actor_dropout)
-        self.decoder_4 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_4', dropout=actor_dropout)
+        # self.decoder_3 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_3', dropout=actor_dropout)
+        # self.decoder_4 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_4', dropout=actor_dropout)
         # self.decoder_5 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_5', dropout=actor_dropout)
 
         # Design Prediction Head
@@ -103,8 +103,8 @@ class TrussDecoder(tf.keras.Model):
         decoded_design = design_sequences_embedded
         decoded_design = self.decoder_1(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
         decoded_design = self.decoder_2(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
-        decoded_design = self.decoder_3(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
-        decoded_design = self.decoder_4(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
+        # decoded_design = self.decoder_3(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
+        # decoded_design = self.decoder_4(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True, training=training)
         # decoded_design = self.decoder_5(decoded_design, encoder_sequence=weight_seq, use_causal_mask=True)
 
         # 4. Design Prediction Head
@@ -152,7 +152,7 @@ class TrussDecoderCritic(tf.keras.Model):
 
         # Variables
         self.num_objectives = 1
-        self.vocab_size = 4
+        self.vocab_size = 5
         self.gen_design_seq_length = config.num_vars + 1
         self.embed_dim = critic_embed_dim
         self.num_heads = critic_heads

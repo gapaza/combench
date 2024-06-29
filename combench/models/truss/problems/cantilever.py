@@ -7,18 +7,14 @@ import math
 dcl = math.sqrt(2) / 2
 
 all_node_load_conds = [
-    [-1, 0],
+    # [-1, 0],
     [0, -1],
-    [1, 0],
+    # [1, 0],
     [0, 1],
     [1, 1],
     [-1, -1],
     [1, -1],
     [-1, 1],
-    # [1*dcl, 1*dcl],
-    # [-1*dcl, -1*dcl],
-    # [1*dcl, -1*dcl],
-    # [-1*dcl, 1*dcl],
 ]
 
 
@@ -35,32 +31,43 @@ class Cantilever(AbstractProblem):
         pass
 
     @staticmethod
-    def type_1_enum(params):
-        type_1_problem = Cantilever.type_1(params)
-        problems = []
-        for load_conn in type_1_problem['load_conds_enum']:
-            problem = {
-                'nodes': type_1_problem['nodes'],
-                'nodes_dof': type_1_problem['nodes_dof'],
-                'load_conds': [load_conn],
-                'member_radii': type_1_problem['member_radii'],
-                'youngs_modulus': type_1_problem['youngs_modulus'],
-            }
-            problems.append(problem)
+    def enumerate(params):
+        problem_set = Cantilever.type_1_load_conds(params)
+        return problem_set
 
-        # shuffle problems to avoid bias
-        # random.seed(42)
-        # random.shuffle(problems)
 
-        return problems
 
+    @staticmethod
+    def enumerate_res(params, sample_size=64):
+        x_range = params['x_range']
+        y_range = params['y_range']
+        x_res_range = params['x_res_range']
+        y_res_range = params['y_res_range']
+        enum_problems = []
+        for x_res in range(x_res_range[0], x_res_range[1] + 1):
+            for y_res in range(y_res_range[0], y_res_range[1] + 1):
+                res_problems = Cantilever.enumerate({
+                    'x_range': x_range,
+                    'y_range': y_range,
+                    'x_res': x_res,
+                    'y_res': y_res,
+                    'member_radii': params['radii'],
+                    'youngs_modulus': params['y_modulus']
+                })
+                enum_problems.append(res_problems)
+                # print('Problem set:', len(res_problems), 'for res:', x_res, y_res)
+        all_problems = []
+        for problem_enum in enum_problems:
+            ss = min(sample_size, len(problem_enum))
+            all_problems.extend(random.sample(problem_enum, ss))
+        return all_problems
 
 
 
 
     # This generates cantilever problems where the mesh and fixed nodes are static, and the load conditions are random
     @staticmethod
-    def type_1(params):
+    def type_1_load_conds(params):
         x_range = params['x_range']
         y_range = params['y_range']
         x_res = params['x_res']
@@ -86,8 +93,8 @@ class Cantilever(AbstractProblem):
                 else:
                     nodes_dof.append([1, 1])
 
-                # 3. Load conditions
-                if i != min(x):
+                # 3. Highlight all possible load locations with -1
+                if i != min(x) and i != x[1]:
                     if j == min(y) or j == max(y) or i == max(x):
                         load_cond_full.append([0, -1])
                     else:
@@ -109,31 +116,22 @@ class Cantilever(AbstractProblem):
             for i, cond in enumerate(nodal_conds):
                 load_cond_temp[idx] = cond
                 load_conds_enum.append(deepcopy(load_cond_temp))
-
-                # print('Load cond = ', load_cond_temp)
-        print('Total load conds = ', len(load_conds_enum))
-
-
-
-        all_load_conds = [
-            # random.choice(load_conds_enum),
-            # random.choice(load_conds_enum),
-            # random.choice(load_conds_enum),
-            load_conds_enum[0],  # load_conds_enum[1], load_conds_enum[2], load_conds_enum[-1]
-        ]
-
-        # all_load_conds = [load_cond_full]
-
+                
+                        
         problem = {
             'nodes': nodes,
             'nodes_dof': nodes_dof,
-            'load_conds': all_load_conds,
-            'load_conds_enum': load_conds_enum,
-            'member_radii': params['radii'],
-            'youngs_modulus': params['y_modulus'],
+            'member_radii': params['member_radii'],
+            'youngs_modulus': params['youngs_modulus'],
         }
+        problem_set = []
+        for load_cond in load_conds_enum:
+            # print('Load cond = ', load_cond)
+            p = deepcopy(problem)
+            p['load_conds'] = [load_cond]
+            problem_set.append(p)
 
-        return problem
+        return problem_set
 
     @staticmethod
     def get_problem(load_conds, x_range=4, y_range=2, x_res=4, y_res=2, radii=0.1, y_modulus=1e9):
@@ -186,13 +184,13 @@ class Cantilever(AbstractProblem):
 
 if __name__ == '__main__':
     from combench.models import truss
-    problem_set = Cantilever.type_1_enum({
+    problem_set = Cantilever.enumerate({
         'x_range': 3,
         'y_range': 3,
         'x_res': 3,
         'y_res': 3,
-        'radii': 0.2,
-        'y_modulus': 210e9
+        'member_radii': 0.2,
+        'youngs_modulus': 210e9
     })
     val_problem_indices = [5, 8, 12, 30]
     train_problem_set = [problem_set[i] for i in range(len(problem_set)) if i not in val_problem_indices]

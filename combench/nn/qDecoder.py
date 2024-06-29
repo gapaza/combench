@@ -21,9 +21,6 @@ actor_heads = 32
 actor_dense = 1024
 actor_dropout = 0.0
 
-# ------------------------------------
-# Actor
-# ------------------------------------
 
 @keras.saving.register_keras_serializable(package="QDecoder", name="QDecoder")
 class QDecoder(tf.keras.Model):

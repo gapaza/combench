@@ -1,19 +1,19 @@
 from copy import deepcopy
-import matplotlib.gridspec as gridspec
 import numpy as np
 import os
 import tensorflow as tf
 from combench.core.algorithm import Algorithm
-from combench.algorithm.nn.trussDecoder import get_models
+from combench.nn.trussDecoder import get_models
 from combench.algorithm import discounted_cumulative_sums
 import random
 import time
 import config
 
 # ------- Run name
-load_name = 'cantilever-4x4-pretrain-50res-flex1'
-save_name = 'cantilever-4x4-pretrain-50res-flex-val'
-metrics_num = 10
+r_num = 5
+load_name = 'ppo-mtl-cantilever-3x6-' + str(r_num)
+save_name = 'ppo-mtl-cantilever-3x6-' + str(r_num) + '-val-1'
+metrics_num = 0
 
 # ------- Sampling parameters
 num_weight_samples = 4  # 4
@@ -25,7 +25,7 @@ task_epochs = 800
 max_nfe = 10000
 clip_ratio = 0.2
 target_kl = 0.005
-entropy_coef = 0.04
+entropy_coef = 0.02
 
 # -------- Problem
 opt_dir = ['max', 'min']
@@ -35,10 +35,9 @@ from combench.models.truss.eval_process import EvaluationProcessManager
 from combench.models.truss.TrussModel import TrussModel as Model
 from combench.models.truss.nsga2 import TrussPopulation as Population
 from combench.models.truss.nsga2 import TrussDesign as Design
-from combench.models.truss import train_problems, val_problems
+from combench.models.truss import val_problems
 for p in val_problems:
     truss.set_norms(p)
-v_problem = val_problems[0]
 
 
 
@@ -130,6 +129,9 @@ class UnconstrainedPPO(Algorithm):
                 self.population.plot_hv(self.save_dir)
                 self.population.plot_population(self.save_dir)
                 self.plot_metrics(['return', 'c_loss', 'kl', 'entropy'], sn=metrics_num)
+                self.population.prune()
+
+        self.eval_manager.shutdown()
 
     def get_cond_vars(self):
         problem_samples_idx = [0]
@@ -356,6 +358,8 @@ class UnconstrainedPPO(Algorithm):
             design_obj = Design(design, self.problem)
             design_obj.objectives = objs
             design_obj.is_feasible = True
+            design_obj.weight = deepcopy(weight)
+            design_obj.epoch = deepcopy(self.curr_epoch)
             design_obj = self.population.add_design(design_obj)
 
 
@@ -541,7 +545,7 @@ class UnconstrainedPPO(Algorithm):
 
 
 if __name__ == '__main__':
-
+    v_problem = val_problems[2]
 
     # Problem
     problem = Model(v_problem)
@@ -553,8 +557,8 @@ if __name__ == '__main__':
 
     # PPO
     actor_path, critic_path = None, None
-    actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_8000')
-    critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_8000')
+    actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_400')
+    critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_400')
     ppo = UnconstrainedPPO(problem, pop, max_nfe, actor_path=actor_path, critic_path=critic_path, run_name=save_name)
     ppo.run()
 

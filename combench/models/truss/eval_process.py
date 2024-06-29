@@ -2,6 +2,7 @@ import multiprocessing
 import time
 import math
 from combench.models import truss
+import json
 
 # Get number of available CPUs
 num_cpus = multiprocessing.cpu_count()
@@ -12,6 +13,13 @@ class EvaluationProcessManager:
         self.num_processes = num_processes
         self.procs = []
         self.init_processes()
+        self.eval_store = {}
+
+    def shutdown(self):
+        for proc in self.procs:
+            proc[1].put(None)
+            proc[0].join()
+
 
     def init_processes(self):
         self.procs = []
@@ -23,6 +31,43 @@ class EvaluationProcessManager:
             self.procs.append([
                 eval_proc, request_queue, response_queue
             ])
+
+    def evaluate_store(self, problems, designs):
+        total_results = len(designs)
+        final_results = [None for x in range(total_results)]
+        designs_to_eval = []
+        designs_to_eval_idx = []
+        designs_alr_eval = []
+        designs_alr_eval_idx = []
+        for idx, (problem, design) in enumerate(zip(problems, designs)):
+            problem_str = json.dumps(problem)
+            design_str = ''.join([str(x) for x in design])
+            if problem_str not in self.eval_store:
+                self.eval_store[problem_str] = {}
+                designs_to_eval.append((problem, design))
+                designs_to_eval_idx.append(idx)
+            elif design_str not in self.eval_store[problem_str]:
+                designs_to_eval.append((problem, design))
+                designs_to_eval_idx.append(idx)
+            else:
+                objs = self.eval_store[problem_str][design_str]
+                designs_alr_eval.append(objs)
+                designs_alr_eval_idx.append(idx)
+                final_results[idx] = objs
+
+        if len(designs_to_eval) > 0:
+            probs = [x[0] for x in designs_to_eval]
+            des = [x[1] for x in designs_to_eval]
+            evals = self.evaluate(probs, des)
+            for idx, (problem, design) in enumerate(zip(probs, des)):
+                problem_str = json.dumps(problem)
+                design_str = ''.join([str(x) for x in design])
+                objs = evals[idx]
+                self.eval_store[problem_str][design_str] = evals[idx]
+                final_idx = designs_to_eval_idx[idx]
+                final_results[final_idx] = objs
+
+        return final_results
 
     def evaluate(self, problems, designs):
         if len(problems) != len(designs):

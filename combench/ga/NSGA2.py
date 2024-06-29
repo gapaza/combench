@@ -7,6 +7,7 @@ import json
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from mlxtend.frequent_patterns import association_rules, apriori
 
 class BenchNSGA2:
 
@@ -146,15 +147,50 @@ class NSGA2:
         self.population.plot_hv(self.save_dir)
         print('FINISHED PLOTTING')
         results = [(nfe, hv) for nfe, hv in zip(self.population.nfes, self.population.hv)]
+        print('RULE MINING')
+        # self.rule_mining()
         return results
 
 
+    def rule_mining(self):
+        # Association rule mining on the designs
+        designs = [design for design in self.population.unique_designs if design.get_plotting_objectives()[0] > 0]
+        print('DESIGNS:', len(designs), len(self.population.unique_designs))
+        designs_low_stiff = []
+        designs_high_stiff = []
+        for design in designs:
+            if abs(design.objectives[0]) < 0.4:
+                designs_low_stiff.append(design.vector)
+            else:
+                designs_high_stiff.append(design.vector)
 
+        set1 = np.array(designs_low_stiff, dtype=bool)
+        set2 = np.array(designs_high_stiff, dtype=bool)
 
+        print('SET1:', set1.shape)
+        print('SET2:', set2.shape)
 
+        df_set1 = pd.DataFrame(set1, columns=[f'attr{i}' for i in range(1, config.num_vars + 1)])
+        df_set2 = pd.DataFrame(set2, columns=[f'attr{i}' for i in range(1, config.num_vars + 1)])
 
+        # Add labels to distinguish sets
+        df_set1['label'] = 'Low Stiffness'
+        df_set2['label'] = 'High Stiffness'
 
+        # Concatenate the two sets
+        df_combined = pd.concat([df_set1, df_set2], ignore_index=True)
 
+        # Ensure boolean values are represented as integers (0 or 1)
+        df_combined.iloc[:, :-1] = df_combined.iloc[:, :-1].astype(bool)
+
+        # Find frequent itemsets
+        frequent_itemsets = apriori(df_combined.iloc[:, :-1], min_support=0.1, use_colnames=True)
+
+        # Generate association rules
+        rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=0.7)
+
+        # Display the results
+        print(rules)
 
 
 

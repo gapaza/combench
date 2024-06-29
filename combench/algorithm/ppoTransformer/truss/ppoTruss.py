@@ -1,35 +1,33 @@
 from copy import deepcopy
-import matplotlib.gridspec as gridspec
 import numpy as np
 import os
 import tensorflow as tf
 import time
 
-import config
 from combench.core.algorithm import MultiTaskAlgorithm
-from combench.algorithm.nn.trussDecoder import get_models
+from combench.nn.trussDecoder import get_models
 from combench.algorithm import discounted_cumulative_sums
 import random
+import config
 
 # ------- Run name
-r_num = 1
-save_name = 'cantilever-4x4-pretrain-50res-flex-' + str(r_num)
-load_name = 'cantilever-4x4-pretrain-50res-flex-' + str(r_num)
-metrics_num = 0
+r_num = 5
+save_name = 'ppo-mtl-cantilever-3x6-' + str(r_num)
+load_name = 'ppo-mtl-cantilever-3x6-' + str(r_num)
+metrics_num = 1
 save_freq = 50
 plot_freq = 20
 
-NUM_PROCS = 3
+NUM_PROCS = 32
 DROPOUT = False
 
 # ------- Sampling parameters
-num_problem_samples = 2  # 1
-num_weight_samples = 9  # 1
+num_problem_samples = 6  # 1
+num_weight_samples = 6  # 1
 repeat_size = 1  # 3
 global_mini_batch_size = num_problem_samples * repeat_size * num_weight_samples  # 4 * 4 * 4 = 64
 
 # -------- Training Parameters
-task_epochs = 800
 max_nfe = 1e15
 clip_ratio = 0.2
 target_kl = 0.005
@@ -69,6 +67,13 @@ class TrussPPO(MultiTaskAlgorithm):
         self.critic_learning_rate = 0.0001  # 0.0001
         self.train_actor_iterations = 40  # was 250
         self.train_critic_iterations = 40  # was 40
+        self.actor_learning_rate = tf.keras.optimizers.schedules.CosineDecay(
+            warmup_steps=100,
+            initial_learning_rate=0.0,
+            warmup_target=self.actor_learning_rate,
+            decay_steps=1000,
+            alpha=1.0
+        )
 
         self.actor_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.actor_learning_rate)
         self.critic_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.critic_learning_rate)
@@ -107,7 +112,7 @@ class TrussPPO(MultiTaskAlgorithm):
         self.run_info['entropy'] = []
 
         # Evaluation Manager
-        self.eval_manager = EvaluationProcessManager(32)
+        self.eval_manager = EvaluationProcessManager(NUM_PROCS)
 
     def save_models(self, epoch=None):
         if epoch:
@@ -135,10 +140,12 @@ class TrussPPO(MultiTaskAlgorithm):
             if self.curr_epoch % plot_freq == 0:
                 self.populations[0].plot_hv(self.save_dir)
                 self.populations[self.last_updated_task].plot_population(self.save_dir)
-                self.plot_metrics(['return', 'c_loss', 'kl', 'entropy', 'avg_dist'], sn=metrics_num)
+                self.plot_metrics(['return', 'c_loss', 'kl', 'entropy'], sn=metrics_num)
                 # print('Time for plotting:', time.time() - curr_time)
             if self.curr_epoch % save_freq == 0:
                 self.save_models(self.curr_epoch)
+
+        self.eval_manager.shutdown()
         self.save_models()
 
     def get_cond_vars(self):
@@ -157,14 +164,26 @@ class TrussPPO(MultiTaskAlgorithm):
         population_samples_all = []
         p_encoding_samples_all = []
 
-        for weight in weight_samples:
-            for idx, p in enumerate(problem_samples):
-                sample_vars = [weight]
-                cond_vars.append(sample_vars)
-                weight_samples_all.append(weight)
-                problem_samples_all.append(p)
-                population_samples_all.append(population_samples[idx])
-                p_encoding_samples_all.append(p.get_encoding())
+
+        for x in range(global_mini_batch_size):
+            weight = random.choice(self.objective_weights)
+            sample_vars = [weight]
+            cond_vars.append(sample_vars)
+            weight_samples_all.append(weight)
+            problem_sample_idx = random.choice(problem_indices)
+            problem_samples_all.append(self.problems[problem_sample_idx])
+            population_samples_all.append(self.populations[problem_sample_idx])
+            p_encoding_samples_all.append(self.problems[problem_sample_idx].get_encoding())
+            self.last_updated_task = problem_sample_idx
+
+        # for weight in weight_samples:
+        #     for idx, p in enumerate(problem_samples):
+        #         sample_vars = [weight]
+        #         cond_vars.append(sample_vars)
+        #         weight_samples_all.append(weight)
+        #         problem_samples_all.append(p)
+        #         population_samples_all.append(population_samples[idx])
+        #         p_encoding_samples_all.append(p.get_encoding())
 
         problem_samples_all = [element for element in problem_samples_all for _ in range(repeat_size)]
         problem_indices_all = [idx for idx in problem_samples_idx for _ in range(repeat_size)]
@@ -453,6 +472,8 @@ class TrussPPO(MultiTaskAlgorithm):
             design_obj = Design(design, problem)
             design_obj.objectives = objs
             design_obj.is_feasible = True
+            design_obj.weight = deepcopy(weight)
+            design_obj.epoch = deepcopy(self.curr_epoch)
             design_obj = population.add_design(design_obj)
 
 
@@ -651,24 +672,13 @@ if __name__ == '__main__':
     pop_size = 50
     ref_point = np.array([0, 1])
 
-    # Single-Task Training
     actor_path, critic_path = None, None
-    # actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_100')
-    # critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_100')
+    # actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_650')
+    # critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_650')
     problems = [Model(deepcopy(problem), num_procs=NUM_PROCS) for problem in train_problems]
-    # pops = [Population(pop_size, ref_point, problem)]
-    # pops = [Population(pop_size, ref_point, problem) for problem in problems]
     pops = [Population(pop_size, ref_point, problem) for idx, problem in enumerate(problems)]
-
     ppo = TrussPPO(problems, pops, max_nfe, actor_path, critic_path, run_name=save_name)
     ppo.run()
-
-    # Multi-Task Training
-    # problems = load_problem_set()
-    # problems = [Model(problem) for problem in problems]
-    # pops = [Population(pop_size, ref_point, problem) for problem in problems]
-    # ppo = TspPPO(problems, pops, max_nfe, run_name=save_name)
-    # ppo.run()
 
 
 

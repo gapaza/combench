@@ -1,13 +1,10 @@
 from copy import deepcopy
-import matplotlib.gridspec as gridspec
 import numpy as np
 import os
 import tensorflow as tf
-import tensorflow_addons as tfa
 
-import config
 from combench.core.algorithm import MultiTaskAlgorithm
-from combench.algorithm.nn.tspDecoder import get_models
+from combench.nn.tspDecoder import get_models
 from combench.algorithm import discounted_cumulative_sums
 import random
 

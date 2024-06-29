@@ -1,44 +1,48 @@
 from copy import deepcopy
 import numpy as np
+import os
 import tensorflow as tf
 from combench.core.algorithm import Algorithm
-from combench.nn.binaryDecoder import get_models
+from combench.nn.trussDecoderSP import get_models
 from combench.algorithm import discounted_cumulative_sums
 import random
+import time
+import config
 
 # ------- Run name
-save_name = 'binary-search'
+run_num = 3
+load_name = 'ppoSP-cantilever-3x4'
+save_name = 'ppoSP-cantilever-3x4-' + str(run_num)
+metrics_num = 0
+plot_freq = 30
 
 # ------- Sampling parameters
 num_weight_samples = 4  # 4
-repeat_size = 1  # 3
+repeat_size = 3  # 3
 global_mini_batch_size = num_weight_samples * repeat_size
 
 # -------- Training Parameters
 task_epochs = 800
-max_nfe = 1000
+max_nfe = 10000
 clip_ratio = 0.2
 target_kl = 0.005
-entropy_coef = 0.02
+entropy_coef = 0.08
 
 # -------- Problem
 opt_dir = ['max', 'min']
 use_constraints = False
-from combench.models.assigning import problem1 as problem
-from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
-from combench.models.assigning.nsga2 import AssigningPop as Population
-from combench.models.assigning.nsga2 import AssigningDesign as Design
+from combench.models import truss
+from combench.models.truss.eval_process import EvaluationProcessManager
+from combench.models.truss.TrussModel import TrussModel as Model
+from combench.models.truss.nsga2 import TrussPopulation as Population
+from combench.models.truss.nsga2 import TrussDesign as Design
+from combench.models.truss import train_problems, val_problems
+import multiprocessing as mp
+mp.set_start_method('fork', force=True)
 
-# opt_dir = ['max', 'max']
-# use_constraints = False
-# from combench.models.knapsack2 import problem1 as problem
-# from combench.models.knapsack2.Knapsack2 import Knapsack2 as Model
-# from combench.models.knapsack2.nsga2 import KPPopulation as Population
-# from combench.models.knapsack2.nsga2 import KPDesign as Design
-# from combench.ga.NSGA2 import BenchNSGA2
 
 # -------- Set random seed for reproducibility
-seed_num = 1
+seed_num = 2
 random.seed(seed_num)
 tf.random.set_seed(seed_num)
 
@@ -55,7 +59,8 @@ class UnconstrainedPPO(Algorithm):
 
         # Objective Weights
         num_keys = 9
-        self.objective_weights = list(np.linspace(0.00, 1.0, num_keys))
+        self.objective_weights = list(np.linspace(0.05, 0.95, num_keys))
+        # self.objective_weights = list(np.linspace(0.05, 0.75, num_keys))
 
         # Optimizer parameters
         self.actor_learning_rate = 0.0001  # 0.0001
@@ -67,10 +72,10 @@ class UnconstrainedPPO(Algorithm):
         self.critic_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.critic_learning_rate)
 
         # Get number of design variables
-        self.num_vars = len(self.problem.random_design())
+        self.num_vars = truss.rep.get_num_bits(self.problem.problem_formulation)
         self.cond_vars = 1  # Just objective weight for now
 
-        self.actor, self.critic = get_models(self.num_vars, self.cond_vars, self.actor_path, self.critic_path)
+        self.actor, self.critic = get_models(self.actor_path, self.critic_path)
 
         # PPO Parameters
         self.gamma = 0.99
@@ -88,6 +93,10 @@ class UnconstrainedPPO(Algorithm):
         self.run_info['c_loss'] = []
         self.run_info['kl'] = []
         self.run_info['entropy'] = []
+        # self.run_info['overlaps'] = []
+
+        # Evaluation Manager
+        self.eval_manager = EvaluationProcessManager(12)
 
     def run(self):
         print('Running PPO')
@@ -97,25 +106,55 @@ class UnconstrainedPPO(Algorithm):
             self.run_epoch()
             self.record()
             self.curr_epoch += 1
-            if self.curr_epoch % 10 == 0:
+            if self.curr_epoch % plot_freq == 0:
                 self.population.plot_hv(self.save_dir)
+                self.population.plot_population(self.save_dir)
+                self.plot_metrics(['return', 'c_loss', 'kl', 'entropy'], sn=metrics_num)
+
+    def sample_normal_discrete(self, mean, std_dev):
+        sample = np.random.normal(mean, std_dev)
+        closest_value = min(self.objective_weights, key=lambda x: abs(x - sample))
+        return closest_value
+
+    def check_overlap(self, design_before, design_after):
+        if 1 not in design_after or 1 not in design_before or design_after[-1] == 0:
+            return False
+
+        num_overlaps_bf = self.count_overlap(design_before)
+        num_overlaps_af = self.count_overlap(design_after)
+        if num_overlaps_bf != num_overlaps_af:
+            return True
+        else:
+            return False
+
+    def count_overlap(self, design):
+        d = deepcopy(design)
+        d += [0] * (config.num_vars - len(d))
+        d_no = truss.rep.remove_overlapping_members(self.problem.problem_formulation, d)
+        num_overlaps = abs(sum(d) - sum(d_no))
+        return num_overlaps
+
 
     def get_cond_vars(self):
-        weight_samples = []
         weight_samples = random.sample(self.objective_weights, num_weight_samples)
+        # weight_samples = [self.sample_normal_discrete(0.5, 0.2) for _ in range(num_weight_samples)]
 
         # Construct conditioning tensor
         cond_vars = []
         weight_samples_all = []
+        p_encoding_samples_all = []
         for weight in weight_samples:
             sample_vars = [weight]
             cond_vars.append(sample_vars)
             weight_samples_all.append(weight)
+            p_encoding_samples_all.append(self.problem.get_encoding())
 
         weight_samples_all = [element for element in weight_samples_all for _ in range(repeat_size)]
         cond_vars = [element for element in cond_vars for _ in range(repeat_size)]
+        p_encoding_samples_all = [element for element in p_encoding_samples_all for _ in range(repeat_size)]
+        p_encoding_tensor = tf.convert_to_tensor(p_encoding_samples_all, dtype=tf.float32)
         cond_vars_tensor = tf.convert_to_tensor(cond_vars, dtype=tf.float32)
-        return cond_vars_tensor, weight_samples_all
+        return cond_vars_tensor, weight_samples_all, p_encoding_tensor
 
     def run_epoch(self):
         new_designs = []
@@ -130,13 +169,15 @@ class UnconstrainedPPO(Algorithm):
         critic_observation_buffer = [[] for x in range(self.mini_batch_size)]
 
         # Get conditioning variables
-        cond_vars_tensor, weight_samples_all = self.get_cond_vars()
+        cond_vars_tensor, weight_samples_all, p_encoding_tensor = self.get_cond_vars()
 
         # Sample actions
+        sample_start_time = time.time()
         for t in range(self.num_vars):
-            action_log_prob, action, all_action_probs = self.sample_actor(observation, cond_vars_tensor)  # returns shape: (batch,) and (batch,)
+            action_log_prob, action, all_action_probs = self.sample_actor(observation, cond_vars_tensor, p_encoding_tensor)  # returns shape: (batch,) and (batch,)
             action_log_prob = action_log_prob.numpy().tolist()
 
+            designs_before = deepcopy(designs)
             observation_new = deepcopy(observation)
             for idx, act in enumerate(action.numpy()):
                 all_actions[idx].append(deepcopy(act))
@@ -148,22 +189,42 @@ class UnconstrainedPPO(Algorithm):
             # Determine reward for each batch element
             if len(designs[0]) == self.num_vars:
                 done = True
+                start_eval_time = time.time()
+
+                # TODO: Inline evals
+                # for idx, design in enumerate(designs):
+                #     # Record design
+                #     design_bitstr = ''.join([str(bit) for bit in design])
+                #     epoch_designs.append(design_bitstr)
+                #
+                #     # Evaluate design
+                #     reward, objs = self.calc_reward(
+                #         design_bitstr,
+                #         weight_samples_all[idx]
+                #     )
+                #     all_rewards[idx].append(reward)
+                #     all_total_rewards.append(reward)
+
+                # TODO: Parallel evals
                 for idx, design in enumerate(designs):
-                    # Record design
                     design_bitstr = ''.join([str(bit) for bit in design])
                     epoch_designs.append(design_bitstr)
-
-                    # Evaluate design
-                    reward, objs = self.calc_reward(
-                        design_bitstr,
-                        weight_samples_all[idx]
-                    )
+                evals = self.calc_reward_batch(designs, weight_samples_all)
+                for idx, (reward, objs) in enumerate(evals):
                     all_rewards[idx].append(reward)
                     all_total_rewards.append(reward)
+
+                eval_time = time.time() - start_eval_time
+
             else:
                 done = False
                 reward = 0.0
                 for idx, _ in enumerate(designs):
+                    # has_overlap = self.check_overlap(designs_before[idx], designs[idx])
+                    # if has_overlap is True:
+                    #     all_rewards[idx].append(-0.01)
+                    # else:
+                    #     all_rewards[idx].append(reward)
                     all_rewards[idx].append(reward)
 
             # Update the observation
@@ -172,12 +233,17 @@ class UnconstrainedPPO(Algorithm):
             else:
                 observation = observation_new
 
+        sample_time = (time.time() - sample_start_time) - eval_time
+        # print(f'Epoch {self.curr_epoch} - Sample Time: {sample_time:.2f}s - Eval Time: {eval_time:.2f}s')
+        # overlaps = np.mean([self.count_overlap(design) for design in designs])
+
+
         # -------------------------------------
         # Sample Critic
         # -------------------------------------
 
         # --- SINGLE CRITIC PREDICTION --- #
-        value_t = self.sample_critic(critic_observation_buffer, cond_vars_tensor)
+        value_t = self.sample_critic(critic_observation_buffer, cond_vars_tensor, p_encoding_tensor)
         value_t = value_t.numpy().tolist()  # (30, 31)
         for idx, value in zip(range(self.mini_batch_size), value_t):
             last_reward = value[-1]
@@ -230,7 +296,7 @@ class UnconstrainedPPO(Algorithm):
                 action_tensor,
                 logprob_tensor,
                 advantage_tensor,
-                cond_vars_tensor
+                cond_vars_tensor, p_encoding_tensor
             )
             if kl > 1.5 * self.target_kl:
                 # Early Stopping
@@ -248,7 +314,7 @@ class UnconstrainedPPO(Algorithm):
             value_loss = self.train_critic(
                 critic_observation_tensor,
                 return_tensor,
-                cond_vars_tensor,
+                cond_vars_tensor, p_encoding_tensor
             )
         value_loss = value_loss.numpy()
 
@@ -256,6 +322,7 @@ class UnconstrainedPPO(Algorithm):
         self.run_info['c_loss'].append(value_loss)
         self.run_info['kl'].append(kl)
         self.run_info['entropy'].append(entr)
+        # self.run_info['overlaps'].append(overlaps)
 
         # Update nfe
         self.nfe = deepcopy(self.population.nfe)
@@ -264,56 +331,75 @@ class UnconstrainedPPO(Algorithm):
     # Reward
     # -------------------------------------
 
-    def calc_reward(self, design_bitstr, weight):
+    def calc_reward_batch(self, designs, weights):
+        e_problems = [self.problem.problem_formulation for _ in range(len(designs))]
+        e_designs = designs
+        objectives = self.eval_manager.evaluate(e_problems, e_designs)
+        # objectives = self.eval_manager.evaluate_store(e_problems, e_designs)
 
-        design_bitlst = [int(bit) for bit in design_bitstr]
-        design = Design(design_bitlst, self.problem)
-        design = self.population.add_design(design)
-        objs = design.evaluate()
+        returns = []
+        for idx, design in enumerate(designs):
+            objs = list(objectives[idx])
+            weight = weights[idx]
 
-        # Find weights
-        w1 = weight
-        w2 = 1.0 - weight
+            # If stiffness is 0, set volfrac to 1
+            if objs[0] == 0:
+                objs[1] = 1.0
 
-        # Calculate terms
-        if opt_dir[0] == 'max':
-            term1 = abs(objs[0]) * w1
-        else:
-            term1 = (1 - objs[0]) * w1
+            # Find weights
+            w1 = weight
+            w2 = 1.0 - weight
 
-        if opt_dir[1] == 'max':
-            term2 = abs(objs[1]) * w2
-        else:
-            term2 = (1 - objs[1]) * w2
+            # Calculate terms
+            if opt_dir[0] == 'max':
+                term1 = abs(objs[0]) * w1
+            else:
+                term1 = (1 - objs[0]) * w1
 
-        # Reward
-        reward = term1 + term2
+            if opt_dir[1] == 'max':
+                term2 = abs(objs[1]) * w2
+            else:
+                term2 = (1 - objs[1]) * w2
+            # Multiplier for term2 (volume fraction) to compete with stiffness
+            # term2 = term2 * 2.0
 
-        # Implement constraints if necessary
-        if use_constraints is True and design.is_feasible is False:
-            reward = design.feasibility_score * -0.01
+            # Reward
+            reward = term1 + term2
 
-        return reward, objs
+            # Create design and add to pop
+            design_obj = Design(design, self.problem)
+            design_obj.objectives = objs
+            design_obj.is_feasible = True
+            design_obj.weight = deepcopy(weight)
+            design_obj.epoch = deepcopy(self.curr_epoch)
+            design_obj = self.population.add_design(design_obj)
+
+
+            # Add to returns
+            returns.append([reward, design_obj])
+
+        return returns
 
     # -------------------------------------
     # Actor-Critic Functions
     # -------------------------------------
 
-    def sample_actor(self, observation, cross_obs):
+    def sample_actor(self, observation, cross_obs, p_encoding):
         inf_idx = len(observation[0]) - 1  # all batch elements have the same length
         observation_input = deepcopy(observation)
         observation_input = tf.convert_to_tensor(observation_input, dtype=tf.float32)
         inf_idx = tf.convert_to_tensor(inf_idx, dtype=tf.int32)
-        return self._sample_actor(observation_input, cross_obs, inf_idx)
+        return self._sample_actor(observation_input, cross_obs, inf_idx, p_encoding)
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, None)
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, 1)
-        tf.TensorSpec(shape=(), dtype=tf.int32)
+        tf.TensorSpec(shape=(), dtype=tf.int32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
-    def _sample_actor(self, observation_input, cross_input, inf_idx):
+    def _sample_actor(self, observation_input, cross_input, inf_idx, p_encoding):
         # print('sampling actor', inf_idx)
-        pred_probs = self.actor([observation_input, cross_input])
+        pred_probs = self.actor([observation_input, cross_input, p_encoding])  # shape (batch, seq_len, 2)
 
         # Batch sampling
         all_token_probs = pred_probs[:, inf_idx, :]  # shape (batch, 2)
@@ -327,24 +413,22 @@ class UnconstrainedPPO(Algorithm):
         actions_log_prob = next_bit_probs  # (batch,)
         return actions_log_prob, actions, all_token_probs
 
-    def sample_critic(self, observation, parent_obs):
+    def sample_critic(self, observation, parent_obs, p_encoding):
         inf_idx = len(observation[0]) - 1
         observation_input = tf.convert_to_tensor(observation, dtype=tf.float32)
         inf_idx = tf.convert_to_tensor(inf_idx, dtype=tf.int32)
-        return self._sample_critic(observation_input, parent_obs, inf_idx)
+        return self._sample_critic(observation_input, parent_obs, inf_idx, p_encoding)
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
-        tf.TensorSpec(shape=(), dtype=tf.int32)
+        tf.TensorSpec(shape=(), dtype=tf.int32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
-    def _sample_critic(self, observation_input, parent_input, inf_idx):
-        t_value = self.critic([observation_input, parent_input])  # (batch, seq_len, 2)
+    def _sample_critic(self, observation_input, parent_input, inf_idx, p_encoding):
+        t_value = self.critic([observation_input, parent_input, p_encoding])  # (batch, seq_len, 2)
         t_value = t_value[:, :, 0]
         return t_value
-        # t_value_stiff = t_value[:, :, 0]  # (batch, 1)
-        # t_value_vol = t_value[:, :, 1]  # (batch, 1)
-        # return t_value_stiff, t_value_vol
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
@@ -352,6 +436,7 @@ class UnconstrainedPPO(Algorithm):
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
     def train_actor(
             self,
@@ -359,10 +444,11 @@ class UnconstrainedPPO(Algorithm):
             action_buffer,
             logprobability_buffer,
             advantage_buffer,
-            parent_buffer
+            parent_buffer,
+            p_encoding_buffer,
     ):
         with tf.GradientTape() as tape:
-            pred_probs = self.actor([observation_buffer, parent_buffer])  # shape: (batch, seq_len, 2)
+            pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer])  # shape: (batch, seq_len, 2)
             pred_log_probs = tf.math.log(pred_probs)  # shape: (batch, seq_len, 2)
             logprobability = tf.reduce_sum(
                 tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
@@ -394,7 +480,7 @@ class UnconstrainedPPO(Algorithm):
         self.actor_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
 
         #  KL Divergence
-        pred_probs = self.actor([observation_buffer, parent_buffer])
+        pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer])
         pred_log_probs = tf.math.log(pred_probs)
         logprobability = tf.reduce_sum(
             tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
@@ -410,17 +496,19 @@ class UnconstrainedPPO(Algorithm):
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
     def train_critic(
             self,
             observation_buffer,
             return_buffer,
             parent_buffer,
+            p_encoding_buffer
     ):
 
         with tf.GradientTape() as tape:  # Record operations for automatic differentiation.
             pred_values = self.critic(
-                [observation_buffer, parent_buffer])  # (batch, seq_len, 2)
+                [observation_buffer, parent_buffer, p_encoding_buffer])  # (batch, seq_len, 2)
 
             # Value Loss (mse)
             value_loss = tf.reduce_mean((return_buffer - pred_values) ** 2)
@@ -432,10 +520,15 @@ class UnconstrainedPPO(Algorithm):
 
 
 
+
 if __name__ == '__main__':
 
+    problem_dict = val_problems[1]
+    truss.set_norms(problem_dict)
+
+
     # Problem
-    problem = Model(problem)
+    problem = Model(problem_dict)
 
     # Population
     pop_size = 50
@@ -443,7 +536,10 @@ if __name__ == '__main__':
     pop = Population(pop_size, ref_point, problem)
 
     # PPO
-    ppo = UnconstrainedPPO(problem, pop, max_nfe, run_name=save_name)
+    actor_path, critic_path = None, None
+    # actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_8000')
+    # critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_8000')
+    ppo = UnconstrainedPPO(problem, pop, max_nfe, actor_path=actor_path, critic_path=critic_path, run_name=save_name)
     ppo.run()
 
 

@@ -11,25 +11,46 @@ from combench.models.truss.problems.truss_type_1 import TrussType1
 
 
 # ------------------------------------------------
-# 1. Variable Length Truss
+# 1. Cantilever
 # ------------------------------------------------
 
-problem_set = TrussType1.enumerate_res({
-    'x_range': 4,
-    'y_range': 4,
-    'x_res_range': [2, 4],
-    'y_res_range': [2, 4],
-    'radii': 0.2,
-    'y_modulus': 210e9
-})
-random.seed(22)
-problem_set = random.sample(problem_set, 256)
-val_problem_indices = [0, 1, 2, 3]
-train_problems = [problem_set[i] for i in range(len(problem_set)) if i not in val_problem_indices]
-val_problems = [problem_set[i] for i in val_problem_indices]
-train_problem = train_problems[0]
-val_problem = val_problems[0]
+def get_cantilever(x_range, x_res, y_range, y_res, radii, y_modulus, ss=64, seed=0):
+    problem_set = Cantilever.enumerate({
+        'x_range': x_range,
+        'y_range': y_range,
+        'x_res': x_res,
+        'y_res': y_res,
+        'member_radii': radii,
+        'youngs_modulus': y_modulus
+    })
+    random.seed(seed)
+    sample_size = min(ss, len(problem_set))
+    problem_set = random.sample(problem_set, sample_size)
+    split_idx = int(0.9 * len(problem_set))
+    train_problems = problem_set[:split_idx]
+    val_problems = problem_set[split_idx:]
+    return train_problems, val_problems
 
 
+# ------------------------------------------------
+# 2. Truss Type 1
+# ------------------------------------------------
+
+def get_truss_type_1(x_range, x_res, y_range, y_res, radii, y_modulus, ss=64, seed=0):
+    problem_set = TrussType1.enumerate({
+        'x_range': x_range,
+        'y_range': y_range,
+        'x_res': x_res,
+        'y_res': y_res,
+        'member_radii': radii,
+        'youngs_modulus': y_modulus
+    })
+    random.seed(seed)
+    sample_size = min(ss, len(problem_set))
+    problem_set = random.sample(problem_set, sample_size)
+    split_idx = int(0.9 * len(problem_set))
+    train_problems = problem_set[:split_idx]
+    val_problems = problem_set[split_idx:]
+    return train_problems, val_problems
 
 

@@ -1049,7 +1049,7 @@ def get_design_metrics(problem, design_rep):
     num_members_no_overlaps = sum(no_overlaps)
     used_nodes = get_used_nodes(problem, design_rep)
     design_angle = get_design_angle(problem, design_rep)
-    vol_frac = eval_volfrac(problem, design_rep, normalize=False)
+    vol_frac = eval_volfrac(problem, design_rep, normalize=True)
     stiff, extra_info = eval_stiffness(problem, design_rep, normalize=False, verbose=True)
 
     metrics = [

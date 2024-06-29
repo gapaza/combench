@@ -7,12 +7,12 @@ from combench.nn.qDecoder import get_models
 from combench.core.algorithm import Algorithm
 
 # ------- Run name
-save_name = 'q-binary-search-assigning-large-2'
+save_name = 'q-cantilever'
 max_nfe = 30000
 plot_freq = 50
 
 # ------- Sampling parameters
-num_weight_samples = 18  # 4
+num_weight_samples = 9  # 4
 repeat_size = 1  # 3
 global_mini_batch_size = num_weight_samples * repeat_size
 
@@ -22,7 +22,7 @@ value_learning_rate = 0.0001
 use_warmup = False
 update_batch_size_max = 16
 update_batch_size_min = 16
-update_batch_iterations = 10
+update_batch_iterations = 45
 update_target_network_freq = 5
 replay_buffer_size = 10000
 epsilon = 0.99  # was 0.99
@@ -32,29 +32,25 @@ decay_steps = 100 * config.num_vars
 # -------- Problem
 opt_dir = ['max', 'min']
 use_constraints = False
-from combench.models.assigning import problem1 as problem
-from combench.models.assigning.GeneralizedAssigning import GeneralAssigning as Model
-from combench.models.assigning.nsga2 import AssigningPop as Population
-from combench.models.assigning.nsga2 import AssigningDesign as Design
+from combench.models import truss
+from combench.models.truss.eval_process import EvaluationProcessManager
+from combench.models.truss.TrussModel import TrussModel as Model
+from combench.models.truss.nsga2 import TrussPopulation as Population
+from combench.models.truss.nsga2 import TrussDesign as Design
+from combench.models.truss import train_problems, val_problems
 
-# opt_dir = ['max', 'max']
-# use_constraints = False
-# from combench.models.knapsack2 import problem1 as problem
-# from combench.models.knapsack2.Knapsack2 import Knapsack2 as Model
-# from combench.models.knapsack2.nsga2 import KPPopulation as Population
-# from combench.models.knapsack2.nsga2 import KPDesign as Design
-# from combench.ga.NSGA2 import BenchNSGA2
+# for p in train_problems:
+#     truss.set_norms(p)
+problem = val_problems[1]
+truss.set_norms(problem)
 
-# -------- Set random seed
-seed_num = 1
+# -------- Set random seed for reproducibility
+seed_num = 4
 random.seed(seed_num)
 tf.random.set_seed(seed_num)
 
 
-
-
-
-class QLearning(Algorithm):
+class QLearningTruss(Algorithm):
 
     def __init__(self, problem, population, max_nfe, q_network_load_path=None, run_name='q-learning'):
         super().__init__(problem, population, run_name, max_nfe)
@@ -101,7 +97,8 @@ class QLearning(Algorithm):
         self.value_network, self.target_value_network = get_models(self.num_vars, self.cond_vars, self.q_network_load_path)
         self.value_optimizer = tf.keras.optimizers.Adam(learning_rate=value_learning_rate)
 
-
+        # Evaluation Manager
+        self.eval_manager = EvaluationProcessManager(16)
 
 
     def run(self):
@@ -126,6 +123,7 @@ class QLearning(Algorithm):
             return self.epsilon_end
         return self.epsilon - self.step * (self.epsilon - self.epsilon_end) / self.decay_steps
 
+
     def get_cross_obs(self):
 
         # Weight sampling
@@ -149,6 +147,8 @@ class QLearning(Algorithm):
         cross_obs_tensor = tf.convert_to_tensor(cross_obs_vars, dtype=tf.float32)
 
         return cross_obs_tensor, weight_samples_all, task_samples_all
+
+
 
     def gen_trajectories(self):
 
@@ -214,6 +214,7 @@ class QLearning(Algorithm):
             children.append(des)
             all_rewards[idx][-1] = reward
             all_rewards_flat.append(reward)
+        # print('DESIGN:', epoch_designs[0])
 
         # -------------------------------------
         # Save to replay buffer
@@ -249,7 +250,6 @@ class QLearning(Algorithm):
 
 
 
-
     def calc_reward(self, design_bitstr, weight):
 
         design_bitlst = [int(bit) for bit in design_bitstr]
@@ -282,6 +282,7 @@ class QLearning(Algorithm):
             reward += (design.feasibility_score * -0.1)
 
         return reward, objs, new_design, design
+
 
     def sample_value_network(self, observation, cross_obs_tensor):
         inf_idx = len(observation[0]) - 1
@@ -406,25 +407,17 @@ class QLearning(Algorithm):
 
 
 
-
-
-
 if __name__ == '__main__':
 
     # Problem
     problem = Model(problem)
 
     # Population
-    pop_size = 200
+    pop_size = 50
     ref_point = np.array([0, 1])  # GA .646
     pop = Population(pop_size, ref_point, problem)
 
     # PPO
-    ppo = QLearning(problem, pop, max_nfe, run_name=save_name)
+    ppo = QLearningTruss(problem, pop, max_nfe, run_name=save_name)
     ppo.run()
-
-
-
-
-
 

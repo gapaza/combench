@@ -5,40 +5,13 @@ import random
 # ----------------- PROBLEMS ----------------- #
 ################################################
 
-from combench.models.truss.problems.cantilever import Cantilever
-from combench.models.truss.problems.truss_type_1 import TrussType1
+from combench.models.truss.problems import get_cantilever
+from combench.models.truss.problems import get_truss_type_1
 
-# 1. Define Problems
-N = 4
-param_dict = {
-    'x_range': N,
-    'y_range': N,
-    'x_res': N,
-    'y_res': N,
-    'radii': 0.2,
-    'y_modulus': 210e9
-}
-
-# 2. Generate Problem Set, Sample
-problem_set = TrussType1.enumerate(
-    param_dict
+train_problems, val_problems = get_cantilever(
+    6, 6, 3, 3, 0.2, 210e9
 )
-random.seed(4)
-problem_set = random.sample(problem_set, 64)
-# for p in problem_set:
-#     set_norms(p)
-
-# 3. Split into Training and Testing
-val_problem_indices = [0, 1, 2, 3]
-train_problems = [problem_set[i] for i in range(len(problem_set)) if i not in val_problem_indices]
-val_problems = [problem_set[i] for i in val_problem_indices]
-
-# 4. Get individual problems for testing
-train_problem = train_problems[0]
-val_problem = val_problems[0]
-
-
-
+print('PROBLEM COUNT:', len(train_problems), len(val_problems))
 
 ############################################################
 # ----------------- EVALUATION FUNCTIONS ----------------- #
@@ -47,10 +20,11 @@ val_problem = val_problems[0]
 REPAIR_OVERLAPS = True
 FC_MARGIN = 1.0
 
+VOLFRAC_TRIVIAL = True
 VOLFRAC_RESOLUTION = 50
-VOLFRAC_MIN, VOLFRAC_MAX = 0.2, 1.0
+VOLFRAC_MIN, VOLFRAC_MAX = None, None
 
-from combench.models.truss.vol.c_geometry import vox_space
+from combench.models.truss.vol.c_geometry import vox_space, vox_space_trivial
 from combench.models.truss.stiffness.truss_model import eval_load_cond
 
 def eval_stiffness(problem, design_rep, normalize=False, verbose=False):
@@ -142,7 +116,12 @@ def set_norms(problem):
 
         volfrac_min = VOLFRAC_MIN
         if volfrac_min is None:
-            volfrac_min = 0.0  # Hardcode for now
+            # volfrac_min = 0.0  # Hardcode for now
+            min_design = [0 for x in range(rep.get_num_bits(problem))]
+            min_design[0] = 1
+            min_design[1] = 1
+            min_design[2] = 1
+            volfrac_min = eval_volfrac(problem, min_design, normalize=False)
         problem['volfrac_norms'] = [volfrac_min, volfrac_max]
         print('--> Problem Normalization:', stiff_vals, [volfrac_min, volfrac_max])
 
@@ -161,8 +140,13 @@ def eval_volfrac(problem, design_rep, normalize=False):
 
     # print('PROBLEM NODES:', problem['nodes'])
     # print('NODE IDX PAIRS:', node_idx_pairs)
+    if VOLFRAC_TRIVIAL is True:
+        design_rep_no = rep.remove_overlapping_members(problem, design_rep)
+        bit_list_no, bit_str_no, node_idx_pairs_no, node_coords_no = rep.convert(problem, design_rep_no)
+        vol_frac = vox_space_trivial(problem, node_idx_pairs_no, resolution=VOLFRAC_RESOLUTION)
+    else:
+        vol_frac = vox_space(problem, node_idx_pairs, resolution=VOLFRAC_RESOLUTION)
 
-    vol_frac = vox_space(problem, node_idx_pairs, resolution=VOLFRAC_RESOLUTION)
 
     if normalize is True:
         set_norms(problem)
@@ -177,7 +161,7 @@ def eval_volfrac(problem, design_rep, normalize=False):
 
 
 if __name__ == '__main__':
-
+    val_problem = val_problems[0]
     num_bits = rep.get_num_bits(val_problem)
     design_rep =[1 for x in range(num_bits)]
     print(rep.get_design_metrics(val_problem, design_rep))

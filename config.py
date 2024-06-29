@@ -1,5 +1,6 @@
 import os
 import tensorflow as tf
+import time
 
 # disable gpu
 # tf.config.set_visible_devices([], 'GPU')
@@ -49,7 +50,14 @@ sidenum_nvar_map = {2: 6, 3: 30, 4: 108, 5: 280, 6: 600, 7: 1134, 8: 1960, 9: 31
 # num_vars = sidenum_nvar_map[sidenum]
 
 # For 3x3 cantilever truss problem
-num_vars = 120  # 36
+n_rows = 3
+n_cols = 6
+num_nodes = n_rows * n_cols
+num_vars = int((num_nodes * (num_nodes-1)) / 2)
+print('NUMBER OF VARIABLES: ', num_vars)
+time.sleep(0.5)
+
+# num_vars = 36  # 36, 120
 
 
 

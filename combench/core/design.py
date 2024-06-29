@@ -18,6 +18,8 @@ class Design(ABC):
         self.rank = None
         self.crowding_distance = None
         self.memory = None
+        self.epoch = None
+        self.weight = None
 
     def is_evaluated(self):
         return self.objectives is not None

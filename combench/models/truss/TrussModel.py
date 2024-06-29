@@ -26,7 +26,7 @@ def local_eval(params):
     return stiff, volfrac
 
 
-NUM_PROCS = 1
+NUM_PROCS = 16
 
 
 class TrussModel(Model):
@@ -76,8 +76,12 @@ class TrussModel(Model):
 
     def evaluate(self, design, normalize=True):
         stiff_vals = truss.eval_stiffness(self.problem_formulation, design, normalize=True)
+        # print('RETURNED STIFF VAL', stiff_vals)
         stiff = stiff_vals[0] * -1.0  # maximize stiffness_old
-        volfrac = truss.eval_volfrac(self.problem_formulation, design)
+        if stiff == 0:
+            volfrac = 1
+        else:
+            volfrac = truss.eval_volfrac(self.problem_formulation, design, normalize=True)
         return stiff, volfrac
 
     def get_encoding(self):
@@ -104,9 +108,10 @@ class TrussModel(Model):
         return encoding, padding_mask
 
 
-from combench.models.truss import Cantilever
 
 if __name__ == '__main__':
+    from combench.models.truss import train_problems, val_problems
+
     param_dict = {
         'x_range': 3,
         'y_range': 3,
@@ -115,9 +120,7 @@ if __name__ == '__main__':
         'radii': 0.2,
         'y_modulus': 210e9
     }
-    problem = Cantilever.type_1(
-        param_dict
-    )
+    problem = val_problems[0]
     truss_model = TrussModel(problem)
 
 

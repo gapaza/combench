@@ -1,5 +1,4 @@
 from copy import deepcopy
-import matplotlib.gridspec as gridspec
 import numpy as np
 import os
 import tensorflow as tf
@@ -7,7 +6,7 @@ import time
 
 import config
 from combench.core.algorithm import MultiTaskAlgorithm
-from combench.algorithm.nn.tspDecoder import get_models
+from combench.nn.tspDecoder import get_models
 from combench.algorithm import discounted_cumulative_sums
 import random
 
@@ -34,7 +33,6 @@ use_constraints = False
 from combench.models.salesman.TravelingSalesman import TravelingSalesman as Model
 from combench.models.salesman.nsga2 import TSPopulation as Population
 from combench.models.salesman.nsga2 import TSDesign as Design
-from combench.models.salesman import load_problem_set, generate_problem_set
 from combench.models.salesman import problem1 as problem
 num_cities = len(problem['cities'])
 
