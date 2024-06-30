@@ -7,13 +7,13 @@ import time
 
 from combench.algorithm import discounted_cumulative_sums
 from combench.core.algorithm import MultiTaskAlgorithm
-from combench.nn.trussDecoderVL import get_models
+from combench.nn.trussDecoderVLrag import get_models
 import random
 
 # ------- Run name
-r_num = 1
-save_name = 'cantilever-NxM-mtl-' + str(r_num)
-load_name = 'cantilever-NxM-mtl-' + str(r_num)
+r_num = 4
+save_name = 'cantilever-NxN-pretrain-50res-flex' + str(r_num)
+load_name = 'cantilever-NxN-pretrain-50res-flex' + str(r_num)
 metrics_num = 0
 save_freq = 50
 plot_freq = 20
@@ -21,8 +21,8 @@ plot_freq = 20
 NUM_PROCS = 1
 
 # ------- Sampling parameters
-num_problem_samples = 9  # 1
-num_weight_samples = 9  # 1
+num_problem_samples = 8  # 1
+num_weight_samples = 8  # 1
 global_mini_batch_size = num_problem_samples * num_weight_samples  # 4 * 4 * 4 = 64
 
 # -------- Training Parameters
@@ -30,7 +30,7 @@ task_epochs = 800
 max_nfe = 1e15
 clip_ratio = 0.2
 target_kl = 0.005
-entropy_coef = 0.02
+entropy_coef = 0.00
 
 # ------------------------------------------------
 # Problem
@@ -44,14 +44,14 @@ from combench.models.truss.TrussModel import TrussModel as Model
 from combench.models.truss.nsga2 import TrussPopulation as Population
 from combench.models.truss.nsga2 import TrussDesign as Design
 
-train_problems, val_problems, val_problems_out = truss.problems.Cantilever.enumerate_res({
+train_problems, val_problems = truss.problems.Cantilever.enumerate_res({
     'x_range': 4,
     'y_range': 4,
-    'x_res_range': [2, 5],
-    'y_res_range': [2, 5],
+    'x_res_range': [2, 4],
+    'y_res_range': [2, 4],
     'radii': 0.2,
     'y_modulus': 210e9
-}, dropout=0.1)
+})
 nn_dict = {}
 for p in train_problems:
     nn = len(p['nodes'])
@@ -59,8 +59,6 @@ for p in train_problems:
         nn_dict[nn] = 1
     else:
         nn_dict[nn] += 1
-    truss.set_norms(p)
-for p in val_problems_out:
     truss.set_norms(p)
 
 # ------------------------------------------------
@@ -76,7 +74,7 @@ train_problems_node_count = [len(p['nodes']) for p in train_problems]
 
 
 # -------- Set random seed for reproducibility
-seed_num = 7
+seed_num = 5
 random.seed(seed_num)
 tf.random.set_seed(seed_num)
 
@@ -100,8 +98,8 @@ class TrussPPOVL(MultiTaskAlgorithm):
         self.train_actor_iterations = 40  # was 250
         self.train_critic_iterations = 40  # was 40
 
-        # self.actor_optimizer = tfa.optimizers.RectifiedAdam(learning_rate=self.actor_learning_rate)
-        self.actor_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.actor_learning_rate)
+        self.actor_optimizer = tfa.optimizers.RectifiedAdam(learning_rate=self.actor_learning_rate)
+        # self.actor_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.actor_learning_rate)
         self.critic_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.critic_learning_rate)
         self.critic_loss = tf.keras.losses.MeanSquaredError()
 
@@ -173,11 +171,6 @@ class TrussPPOVL(MultiTaskAlgorithm):
                 # print('Time for plotting:', time.time() - curr_time)
             if self.curr_epoch % save_freq == 0:
                 self.save_models(self.curr_epoch)
-
-            if self.curr_epoch % 10 == 0:
-                len_error = self.actor.generate(val_problems_out[0])
-                print('Transfer Len Error:', len_error)
-
         self.eval_manager.shutdown()
         self.save_models()
 
@@ -275,14 +268,14 @@ class TrussPPOVL(MultiTaskAlgorithm):
                             reward = 0.1
                             designs_in_progress[idx] = False
                         else:
-                            reward = abs((len(all_actions[idx])+1) - curr_design_num_vars) * -0.01 # Scale by number of missing vars
+                            reward = abs((len(all_actions[idx])+1) - curr_design_num_vars) * -0.1 # Scale by number of missing vars
                         # designs_in_progress[idx] = False  # Use to clip generations after design len.
 
                     else:  # Token generated in design position (0 or 1)
                         observation_new[idx].append(m_action + 2)
                         designs[idx].append(m_action)
                         if m_action == 2:  # Premature end token
-                            reward = abs(len(curr_design) - curr_design_num_vars) * -0.01  # Scale by number of missing vars
+                            reward = abs(len(curr_design) - curr_design_num_vars) * -0.1  # Scale by number of missing vars
                             designs_in_progress[idx] = False
                         elif len(designs[idx]) == curr_design_num_vars:  # Evaluate the design
                             reward = 55  # TODO: PLACEHOLDER REWARD FOR EVAL LATER

@@ -86,6 +86,8 @@ def plot_select_designs(problem, designs, save_dir):
     if len(designs) > 3:
         p = problem
         design_info = [[design.get_plotting_objectives(), design.vector] for design in designs if design.objectives[0] != 0]
+        if len(design_info) < 3:
+            return
         design_info_s = sorted(design_info, key=lambda x: x[0][0])
         design_info_v = sorted(design_info, key=lambda x: x[0][1])
         d_first_s = design_info_s[0]

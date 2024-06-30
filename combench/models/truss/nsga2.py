@@ -119,16 +119,20 @@ class TrussPopulation(UnconstrainedPop):
         all_weights_file = os.path.join(save_dir, 'weights_all.png')
 
         # Pareto designs
-        plotting.plot_pareto_designs(self.designs, pareto_plot_file, pareto_json_file)
+        if len(self.designs) > 0:
+            plotting.plot_pareto_designs(self.designs, pareto_plot_file, pareto_json_file)
 
         # Viz 3 Individual Select Pareto Designs
-        plotting.plot_select_designs(p, self.designs, save_dir)
+        if len(self.designs) > 5:
+            plotting.plot_select_designs(p, self.designs, save_dir)
 
         # All designs
-        plotting.plot_all_designs(self.unique_designs, all_plot_file)
+        if len(self.unique_designs) > 0:
+            plotting.plot_all_designs(self.unique_designs, all_plot_file)
 
         # Plot weight graph
-        plotting.plot_weight_graph(self.unique_designs, all_weights_file)
+        if len(self.unique_designs) > 0:
+            plotting.plot_weight_graph(self.unique_designs, all_weights_file)
 
 
 

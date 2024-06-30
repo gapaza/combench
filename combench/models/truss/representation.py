@@ -1080,21 +1080,33 @@ def get_design_metrics(problem, design_rep):
     return metrics_text
 
 # ------------------------------
-# Evaluation
+# Problem encoding
 # ------------------------------
-# from truss.model.vol.c_geometry import vox_space
-# from truss.model.stiffness_old.Stiffness import Stiffness
+
+def get_problem_encoding(problem):
+    # Create a vector for each node with the following values:
+    # [x, y, dofx, dofy, fx, fy]
+    load_cond = problem['load_conds'][0]
+    node_vectors = []
+    for idx, node in enumerate(problem['nodes']):
+        node_dof = problem['nodes_dof'][idx]
+        node_load = load_cond[idx]
+        node_vector = np.array([
+            node[0], node[1], node_dof[0], node_dof[1], node_load[0], node_load[1]
+            # node_load[0], node_load[1]
+        ])
+        node_vectors.append(node_vector)
+    return node_vectors
 
 
-# def eval_volfrac(problem, design_rep):
-#     bit_list, bit_str, node_idx_pairs, node_coords = convert(problem, design_rep)
-#     vol_frac = vox_space(problem, node_idx_pairs, resolution=100)
-#     return vol_frac
+def get_problem_encoding_padded(problem, pad_len):
+    encoding = get_problem_encoding(problem)
+    padding_mask = [1 for x in encoding]  # 1s where actual nodes are
+    padding_mask += [0 for x in range(pad_len - len(encoding))]
+    encoding += [[0 for x in range(6)] for x in range(pad_len - len(encoding))]
+    return encoding, padding_mask
 
 
-# def eval_stiffness(problem, design_rep):
-#     return Stiffness().evaluate(problem, design_rep)
-#
 
 
 if __name__ == '__main__':
