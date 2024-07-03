@@ -17,6 +17,7 @@ class EvaluationProcessManager:
 
     def shutdown(self):
         for proc in self.procs:
+            # print('Shutting down process')
             proc[1].put(None)
             proc[0].join()
 
@@ -127,8 +128,11 @@ class EvaluationProcess2(multiprocessing.Process):
 
 
     def eval(self, problem, design, normalize=True):
-        stiff_vals = truss.eval_stiffness(problem, design, normalize=True)
-        stiff = stiff_vals[0] * -1.0  # maximize stiffness_old
+        if isinstance(design, list) and 1 not in design:
+            stiff = 0
+        else:
+            stiff_vals = truss.eval_stiffness(problem, design, normalize=True)
+            stiff = stiff_vals[0] * -1.0  # maximize stiffness_old
         if stiff == 0:
             volfrac = 1.0
         else:

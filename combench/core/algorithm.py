@@ -104,13 +104,16 @@ class MultiTaskAlgorithm(ABC):
         print(self.curr_epoch, end=' | ')
         for key, value in self.run_info.items():
             if isinstance(value, list):
-                print("%s: %.5f" % (key, value[-1]), end=' | ')
+                if len(value) > 0:
+                    if not isinstance(value[0], list):
+                        print("%s: %.5f" % (key, value[-1]), end=' | ')
             else:
                 print("%s: %.5f" % (key, value), end=' | ')
         self.populations[0].prune()
         self.populations[0].record()
         if self.val_run is True:
-            print('nfe:', self.nfe, "hv: %.5f" % self.populations[0].hv[-1])
+            # print('nfe:', self.nfe, "hv: %.5f" % self.populations[0].hv[-1])
+            print('nfe:', self.nfe)
         else:
             print('')
 
@@ -147,8 +150,17 @@ class MultiTaskAlgorithm(ABC):
         # Plot each list of floats in a subplot
         for idx, (key, values) in enumerate(plot_dict.items()):
             ax = axes[idx]
-            ax.plot(values)
-            ax.set_title(f'{key}')
+            if key != 'pareto_sen':
+                ax.plot(values)
+                ax.set_title(f'{key}')
+                # Set axis range
+            else:
+                for s_idx, sens in enumerate(values):
+                    ax.plot(sens, label=str(s_idx))
+                ax.set_title(f'{key}')
+                ax.legend()
+
+
 
         # Turn off unused axes
         for idx in range(num_plots, len(axes)):

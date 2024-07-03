@@ -44,7 +44,7 @@ from combench.models.truss.TrussModel import TrussModel as Model
 from combench.models.truss.nsga2 import TrussPopulation as Population
 from combench.models.truss.nsga2 import TrussDesign as Design
 
-train_problems, val_problems = truss.problems.Cantilever.enumerate_res({
+train_problems, val_problems = truss.problems.Cantilever.type_2_enum({
     'x_range': 4,
     'y_range': 4,
     'x_res_range': [2, 4],

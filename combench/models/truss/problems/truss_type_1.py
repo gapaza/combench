@@ -5,7 +5,6 @@ import random
 from combench.models import truss
 from itertools import combinations
 
-
 node_loads_enum = [
     [-1, 0],
     [0, -1],
@@ -20,16 +19,36 @@ node_loads_enum = [
 RM_NODES = False
 
 
-
 class TrussType1(AbstractProblem):
-
 
     def __init__(self):
         super().__init__()
 
     @staticmethod
-    def enumerate(params):
+    def enumerate(params, p_type='type1'):
+        if p_type == 'type1':
+            return TrussType1.type_1_enum(params)
+        elif p_type == 'type2':
+            return TrussType1.type_2_enum(params)
+        else:
+            raise ValueError('Invalid problem type')
 
+    # ----------------------------------------------------------
+    # Type 1
+    #   Fixed Parameters
+    #   - node mesh
+    #   - x node count
+    #   - y node count
+    #   - member radii
+    #   - young's modulus
+    #
+    #   Enumerated Parameters
+    #   - fixed node locations (2 fixed)
+    #   - loaded node locations
+    # ----------------------------------------------------------
+
+    @staticmethod
+    def type_1_enum(params):
         x_range = params['x_range']
         y_range = params['y_range']
         x_res = params['x_res']
@@ -83,17 +102,30 @@ class TrussType1(AbstractProblem):
 
         return enum_problems
 
+    # ----------------------------------------------------------
+    # Type 2
+    #   Fixed Parameters
+    #   - node mesh
+    #   - member radii
+    #   - young's modulus
+    #
+    #   Enumerated Parameters
+    #   - x node count
+    #   - y node count
+    #   - fixed node locations (2 fixed)
+    #   - loaded node locations
+    # ----------------------------------------------------------
 
     @staticmethod
-    def enumerate_res(params, sample_size=64):
+    def type_2_enum(params, sample_size=64):
         x_range = params['x_range']
         y_range = params['y_range']
         x_res_range = params['x_res_range']
         y_res_range = params['y_res_range']
         enum_problems = []
-        for x_res in range(x_res_range[0], x_res_range[1]+1):
-            for y_res in range(y_res_range[0], y_res_range[1]+1):
-                res_problems = TrussType1.enumerate({
+        for x_res in range(x_res_range[0], x_res_range[1] + 1):
+            for y_res in range(y_res_range[0], y_res_range[1] + 1):
+                res_problems = TrussType1.type_1_enum({
                     'x_range': x_range,
                     'y_range': y_range,
                     'x_res': x_res,
@@ -108,21 +140,13 @@ class TrussType1(AbstractProblem):
             ss = min(sample_size, len(problem_enum))
             all_problems.extend(random.sample(problem_enum, ss))
 
-
         # print('Problem set:', len(all_problems))
         return all_problems
 
 
 
-
-
-
-
-
-
-
 def res_full():
-    problem_set = TrussType1.enumerate_res({
+    problem_set = TrussType1.type_2_enum({
         'x_range': 4,
         'y_range': 4,
         'x_res_range': [2, 4],
@@ -135,11 +159,7 @@ def res_full():
     design_rep = [1 for x in range(truss.rep.get_num_bits(problem_set[0]))]
     truss.rep.viz(problem_set[0], design_rep, f'problems/{TrussType1.__name__}RES.png')
 
-
     exit(0)
-
-
-
 
 
 if __name__ == '__main__':
@@ -159,9 +179,8 @@ if __name__ == '__main__':
     print('NUM PROBLEMS:', len(problem_set))
     problem = problem_set[0]
 
-
-
     from combench.models.truss import rep
+
     design_rep = [int(1) for x in range(rep.get_num_bits(problem))]
     # design_rep = '001010111110000101111111011110101111011101000000000000111001001101011111001011110001001010101011110101101100000011001011'
     # design_rep = [int(x) for x in design_rep]
@@ -169,4 +188,3 @@ if __name__ == '__main__':
         (0, 1), (0, 6)
     ]
     rep.viz(problem, design_rep, f'problems/{TrussType1.__name__}.png')
-

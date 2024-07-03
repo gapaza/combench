@@ -119,8 +119,6 @@ def set_norms(problem):
             # volfrac_min = 0.0  # Hardcode for now
             min_design = [0 for x in range(rep.get_num_bits(problem))]
             min_design[0] = 1
-            min_design[1] = 1
-            min_design[2] = 1
             volfrac_min = eval_volfrac(problem, min_design, normalize=False)
         problem['volfrac_norms'] = [volfrac_min, volfrac_max]
         print('--> Problem Normalization:', stiff_vals, [volfrac_min, volfrac_max])

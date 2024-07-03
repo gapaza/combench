@@ -20,12 +20,12 @@ from combench.models.truss.TrussModel import TrussModel
 # 3: 1-bit
 
 actor_embed_dim = 32
-actor_heads = 8
+actor_heads = 16
 actor_dense = 512
 actor_dropout = 0.0
 
 critic_embed_dim = 32
-critic_heads = 8
+critic_heads = 16
 critic_dense = 512
 critic_dropout = 0.0
 
@@ -41,17 +41,11 @@ class TrussDecoder(tf.keras.Model):
 
         # Variables
         self.vocab_size = 4
-        self.vocab_output_size = 3  # Include stop token in variable length chromosome
+        self.vocab_output_size = 2  # Include stop token in variable length chromosome
         self.gen_design_seq_length = config.num_vars
         self.embed_dim = actor_embed_dim
         self.num_heads = actor_heads
         self.dense_dim = actor_dense
-
-        # Conditioning Vector Positional Encoding
-        # self.positional_encoding = SinePositionEncoding(name='positional_encoding')
-        # self.node_positional_encoding = SinePositionEncoding(name='node_positional_encoding')
-        self.cross_rotary_embedding = RotaryEmbedding(self.embed_dim, name='cross_rotary_embedding')
-
 
         # Token + Position embedding
         self.design_embedding_layer = TokenAndPositionEmbedding(
@@ -60,14 +54,7 @@ class TrussDecoder(tf.keras.Model):
             self.embed_dim,
             mask_zero=True
         )
-        # Just use an embedding layer
-        # self.design_embedding_layer = Embedding(
-        #     input_dim=self.vocab_size,
-        #     output_dim=self.embed_dim,
-        #     mask_zero=True,
-        # )
         self.sine_positional_encoding = SinePositionEncoding(name='positional_encoding')
-        self.design_rotary_embedding = RotaryEmbedding(self.embed_dim, name='design_rotary_embedding')
 
 
 
@@ -139,7 +126,7 @@ class TrussDecoder(tf.keras.Model):
         design_prediction_logits = self.design_prediction_head(decoded_design)
         design_prediction = self.activation(design_prediction_logits)
 
-        return design_prediction  # For training
+        return design_prediction
 
     def add_positional_encoding(self, weights, nodes):
 
@@ -162,47 +149,127 @@ class TrussDecoder(tf.keras.Model):
         return cls(**config)
 
 
-    def generate(self, problem, batch_size=1):
+
+    def beam_search(self, problem, w=[0.5, 0.7], beam_width=3):
+        weights = [[i] for i in w]
+        weights_tensor = tf.convert_to_tensor(weights, dtype=tf.float32)
+        batch_size = len(weights)
+        start_token_idx = 1
+        num_p_vars = truss.rep.get_num_bits(problem)
+        num_nodes = len(problem['nodes'])
+
+        # Initialize beams
+        beams = [[([start_token_idx], 0.0)] * beam_width for _ in range(batch_size)]
+
+        # Prepare problem encoding
+        problem_encoding, pad_mask = truss.rep.get_problem_encoding_padded(problem, pad_len=num_nodes)
+        problem_encoding = tf.convert_to_tensor(problem_encoding, dtype=tf.float32)
+        problem_encoding = tf.expand_dims(problem_encoding, axis=0)
+        problem_encoding = tf.tile(problem_encoding, [batch_size, 1, 1])
+        pad_mask = tf.convert_to_tensor(pad_mask, dtype=tf.int32)
+        pad_mask = tf.expand_dims(pad_mask, axis=0)
+        pad_mask = tf.tile(pad_mask, [batch_size, 1])
+
+        print('\n\n------------ BEAM SEARCH INPUTS')
+        print('Problem Encoding:', problem_encoding.shape)
+        print('Pad Mask:', pad_mask.shape)
+        print('Beams:', beams)
+        print('Weights:', weights_tensor.shape, weights)
+
+        for x in range(num_p_vars):
+            all_candidates = [[] for _ in range(batch_size)]
+
+            # Prepare inputs for the current step
+            obs_inputs = []
+            # weight_inputs = []
+            for i in range(batch_size):
+                for seq, seq_prob in beams[i]:
+                    obs_inputs.append(seq)
+                    # weight_inputs.append(weights[i])
+
+            obs_inputs = tf.convert_to_tensor(obs_inputs, dtype=tf.int32)
+            # weight_inputs = tf.convert_to_tensor(weight_inputs, dtype=tf.float32)
+
+            # Predict next tokens and their probabilities
+            pred_probs = self([obs_inputs, weights_tensor, problem_encoding, pad_mask], training=False)
+            all_token_probs = pred_probs[:, x, :]  # shape (batch * beam_width, 2)
+            all_token_log_probs = tf.math.log(all_token_probs + 1e-10)
+
+            # Get top-k tokens and their probabilities
+            top_k_probs, top_k_indices = tf.nn.top_k(all_token_log_probs, k=beam_width)
+
+            # Collect new candidates
+            candidate_idx = 0
+            for i in range(batch_size):
+                for j in range(beam_width):
+                    seq, seq_prob = beams[i][j]
+                    for k in range(beam_width):
+                        new_seq = seq + [int(top_k_indices[candidate_idx, k])]
+                        new_prob = seq_prob + float(top_k_probs[candidate_idx, k])
+                        all_candidates[i].append((new_seq, new_prob))
+                    candidate_idx += 1
+
+            # Select top beam_width sequences for each weight
+            for i in range(batch_size):
+                all_candidates[i].sort(key=lambda x: x[1], reverse=True)
+                beams[i] = all_candidates[i][:beam_width]
+
+            # Select the best sequence from each beam
+        final_designs = [max(beams[i], key=lambda x: x[1])[0] for i in range(batch_size)]
+
+        print('\n\n------------ BEAM SEARCH OUTPUTS')
+        print('Final Designs:', final_designs)
+        print('Final Designs Length:', len(final_designs))
+
+        exit(0)
+
+
+
+
+
+
+    def generate(self, problem, w=[0.5, 0.7]):
+        weights = []
+        for i in w:
+            weights.append([i])
+        batch_size = len(weights)
         designs = [[] for x in range(batch_size)]
         start_token_idx = 1
-        end_token_idx = 2
         observation = [[start_token_idx] for x in range(batch_size)]
         num_p_vars = truss.rep.get_num_bits(problem)
         num_nodes = len(problem['nodes'])
         problem_encoding, pad_mask = truss.rep.get_problem_encoding_padded(problem, pad_len=num_nodes)
         problem_encoding = tf.convert_to_tensor(problem_encoding, dtype=tf.float32)
         problem_encoding = tf.expand_dims(problem_encoding, axis=0)
+        problem_encoding = tf.tile(problem_encoding, [batch_size, 1, 1])
         pad_mask = tf.convert_to_tensor(pad_mask, dtype=tf.int32)
         pad_mask = tf.expand_dims(pad_mask, axis=0)
-        for x in range(config.num_vars):
+        pad_mask = tf.tile(pad_mask, [batch_size, 1])
+        for x in range(num_p_vars):
             obs_input = tf.convert_to_tensor(observation, dtype=tf.int32)
-            weight_input = tf.convert_to_tensor([[0.5]], dtype=tf.float32)
+            weight_input = tf.convert_to_tensor(weights, dtype=tf.float32)
             pred_probs = self([obs_input, weight_input, problem_encoding, pad_mask], training=False)
             all_token_probs = pred_probs[:, x, :]  # shape (batch, 2)
             all_token_log_probs = tf.math.log(all_token_probs + 1e-10)
-            samples = tf.random.categorical(all_token_log_probs, 1)  # shape (batch, 1)
+
+            # Soft sampling
+            # samples = tf.random.categorical(all_token_log_probs, 1)  # shape (batch, 1)
+
+            # Top 1 sampling
+            samples = tf.argmax(all_token_probs, axis=-1, output_type=tf.int64)
+            samples = tf.expand_dims(samples, axis=-1)
+
             next_bit_ids = tf.squeeze(samples, axis=-1)  # shape (batch,)
             batch_indices = tf.range(0, tf.shape(all_token_log_probs)[0], dtype=tf.int64)  # shape (batch,)
             next_bit_probs = tf.gather_nd(all_token_log_probs, tf.stack([batch_indices, next_bit_ids], axis=-1))
             actions = next_bit_ids  # (batch,)
-            gen_ended = False
             for idx, act in enumerate(actions.numpy()):
-                if act == end_token_idx:
-                    gen_ended = True
-                    break
                 m_action = int(deepcopy(act))  # 0, 1, or 2 for end token
                 curr_design = designs[idx]
                 curr_design.append(m_action)
                 observation[idx].append(m_action + 2)
-            if gen_ended is True:
-                break
 
-        # print('Num expected vars:', num_p_vars)
-        # print('Num generated vars:', len(designs[0]))
-        error = abs(num_p_vars - len(designs[0]))
-        return error
-
-
+        return designs
 
 
 
@@ -227,7 +294,7 @@ class TrussDecoderCritic(tf.keras.Model):
 
         # Variables
         self.num_objectives = 1
-        self.vocab_size = 5
+        self.vocab_size = 4
         self.gen_design_seq_length = config.num_vars + 1
         self.embed_dim = critic_embed_dim
         self.num_heads = critic_heads
@@ -254,6 +321,8 @@ class TrussDecoderCritic(tf.keras.Model):
         self.normalize_first = False
         self.decoder_1 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_1', dropout=critic_dropout)
         self.decoder_2 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_2')
+        # self.decoder_3 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_3')
+        # self.decoder_4 = TransformerDecoder(self.dense_dim, self.num_heads, normalize_first=self.normalize_first, name='decoder_4')
 
         # Output Prediction Head
         self.output_modeling_head = layers.Dense(self.num_objectives, name='output_modeling_head')
@@ -283,6 +352,8 @@ class TrussDecoderCritic(tf.keras.Model):
         decoded_design = design_sequences_embedded
         decoded_design = self.decoder_1(decoded_design, encoder_sequence=weight_seq, encoder_padding_mask=enc_attn_msk, use_causal_mask=True, training=training)
         decoded_design = self.decoder_2(decoded_design, encoder_sequence=weight_seq, encoder_padding_mask=enc_attn_msk, use_causal_mask=True, training=training)
+        # decoded_design = self.decoder_3(decoded_design, encoder_sequence=weight_seq, encoder_padding_mask=enc_attn_msk, use_causal_mask=True, training=training)
+        # decoded_design = self.decoder_4(decoded_design, encoder_sequence=weight_seq, encoder_padding_mask=enc_attn_msk, use_causal_mask=True, training=training)
 
         # 4. Output Prediction Head
         output_prediction_logits = self.output_modeling_head(decoded_design)

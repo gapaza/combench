@@ -141,9 +141,13 @@ class TrussPopulation(UnconstrainedPop):
 
 if __name__ == '__main__':
 
-    from combench.models.truss import train_problems, val_problems
-    v_problem = val_problems[2]
-
+    # from combench.models.truss import train_problems, val_problems
+    # v_problem = val_problems[2]
+    val_num = 8
+    # for val_num in range(2, 8):
+    from combench.models.truss.problems.cantilever import get_problems
+    train_problems, val_problems, val_problems_out = get_problems()
+    v_problem = val_problems[val_num]
     truss.set_norms(v_problem)
 
     # Population
@@ -152,8 +156,10 @@ if __name__ == '__main__':
     ref_point = np.array([0, 1])
     pop = TrussPopulation(pop_size, ref_point, p_model)
     max_nfe = 5000
-    nsga2 = NSGA2(pop, p_model, max_nfe, run_name='ga-cantilever-3x6-1')
+    nsga2 = NSGA2(pop, p_model, max_nfe, run_name=f'ga-cantilever-val-{val_num}')
     nsga2.run()
+
+    # Valida
 
 
 
