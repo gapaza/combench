@@ -18,6 +18,9 @@ from combench.models.truss.eval_process import EvaluationProcessManager
 # ----------------------------
 
 def analyze_pareto(model, problem, eval_manager):
+    all_hvs = []
+    sensitivity = 0
+
     seq_len = truss.rep.get_num_bits(problem)
     weights = list(np.linspace(0.0, 1.0, 10))
     truss_model = Model(problem)
@@ -31,14 +34,17 @@ def analyze_pareto(model, problem, eval_manager):
     designs_greedy = model.generate(problem, w=weights)
     designs_str = [''.join([str(d) for d in design]) for design in designs_greedy]
     designs_str_unique = list(set(designs_str))
+    designs_bitlist_unique = [list(map(int, list(design))) for design in designs_str_unique]
     num_designs_greedy = len(designs_str_unique)
-    designs_weights = weights
+    designs_weights_greedy = weights
     pop_greedy = Population(30, np.array([0, 1]), truss_model)
-    eval_problems = [problem for _ in range(len(designs_greedy))]
-    eval_populations = [pop_greedy for _ in range(len(designs_greedy))]
-    objectives = eval_manager.evaluate(eval_problems, designs_greedy)
-    evals = calc_reward_batch(designs_greedy, designs_weights, objectives, eval_problems, eval_populations)
+    eval_problems_greedy = [problem for _ in range(len(designs_greedy))]
+    eval_populations_greedy = [pop_greedy for _ in range(len(designs_greedy))]
+    objectives = eval_manager.evaluate(eval_problems_greedy, designs_greedy)
+    evals = calc_reward_batch(designs_greedy, designs_weights_greedy, objectives, eval_problems_greedy, eval_populations_greedy)
     hv_greedy = pop_greedy.calc_hv()
+    all_hvs.append(hv_greedy)
+    sensitivity = len(designs_str_unique)
 
     print('Greedy Designs:', num_designs_greedy)
     print('Greedy Design Example:', designs_str_unique[0])
@@ -47,11 +53,11 @@ def analyze_pareto(model, problem, eval_manager):
 
 
     # 2. Calc hv from beam search
-    beam_widths = [2, 5, 10, 20, 50, 100]
+    beam_widths = [2, 5, 10, 20, 50]
     beam_width_hvs = []
     beam_width_sens = []
     for beam_width in beam_widths:
-        designs_beam, designs_weights = beam_search(actor, problem, weights, beam_width=beam_width)
+        designs_beam, designs_weights = beam_search(model, problem, weights, beam_width=beam_width)
         num_designs_beam = len(designs_beam)
         pop_beam = Population(30, np.array([0, 1]), truss_model)
         eval_problems = [problem for _ in range(len(designs_beam))]
@@ -62,6 +68,27 @@ def analyze_pareto(model, problem, eval_manager):
         beam_width_hvs.append(hv_beam)
         beam_width_sens.append(num_designs_beam)
         print(beam_width, 'Beam:', num_designs_beam, hv_beam)
+        all_hvs.append(hv_beam)
+
+        # if beam_width == beam_widths[-1]:
+        #     designs_combined = designs_beam + designs_greedy
+        #     weights_combined = designs_weights + designs_weights_greedy
+        #     eval_problems = eval_problems + eval_problems_greedy
+        #     pop_combined = Population(30, np.array([0, 1]), truss_model)
+        #     eval_populations = [pop_combined for _ in range(len(designs_combined))]
+        #     objectives = eval_manager.evaluate(eval_problems, designs_combined)
+        #     evals = calc_reward_batch(designs_combined, weights_combined, objectives, eval_problems, eval_populations)
+        #     hv_combined = pop_combined.calc_hv()
+        #     designs_combined_str = [''.join([str(d) for d in design]) for design in designs_combined]
+        #     designs_combined_str_unique = list(set(designs_combined_str))
+        #     print('Combined:', len(designs_combined_str_unique), hv_combined)
+        #     all_hvs.append(hv_combined)
+
+    return all_hvs, sensitivity
+
+
+
+
 
 
 
@@ -292,8 +319,6 @@ if __name__ == '__main__':
 
     train_problems, val_problems, val_problems_out = get_problems()
     eval_manager = EvaluationProcessManager(32)
-
-
 
     # 1. Set norms
     for idx, v_problem in enumerate(val_problems):

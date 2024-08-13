@@ -35,7 +35,7 @@ def get_problems():
         p_type='type2',
         dropout=0.0,
         seed=0,
-        sample_size=4
+        sample_size=6
     )
     print('\n\n---------------------------- Problem Set')
     print('--- Train Problems:', len(train_problems))
@@ -75,7 +75,7 @@ class Cantilever(AbstractProblem):
     # ----------------------------------------------------------
 
     @staticmethod
-    def type_1_enum(params, dropout=0.0, split=False):
+    def type_1_enum(params, dropout=0.0, split=False, nlc=None):
         x_range = params['x_range']
         y_range = params['y_range']
         x_res = params['x_res']
@@ -120,7 +120,10 @@ class Cantilever(AbstractProblem):
         load_conds_enum = []
         for idx in load_conds_idx[0]:
             load_cond_temp = np.zeros_like(load_conds)
-            nodal_conds = deepcopy(all_node_load_conds)
+            if nlc is None:
+                nodal_conds = deepcopy(all_node_load_conds)
+            else:
+                nodal_conds = deepcopy(nlc)
             for i, cond in enumerate(nodal_conds):
                 load_cond_temp[idx] = cond
                 load_conds_enum.append(deepcopy(load_cond_temp))

@@ -84,7 +84,7 @@ class TrussModel(Model):
             volfrac = truss.eval_volfrac(self.problem_formulation, design, normalize=True)
         return stiff, volfrac
 
-    def get_encoding(self):
+    def get_encoding(self, rand=False):
         # Create a vector for each node with the following values:
         # [x, y, dofx, dofy, fx, fy]
         problem = self.problem_formulation
@@ -98,10 +98,12 @@ class TrussModel(Model):
                 # node_load[0], node_load[1]
             ])
             node_vectors.append(node_vector)
+        if rand is True:
+            random.shuffle(node_vectors)
         return node_vectors
 
-    def get_padded_encoding(self, pad_len):
-        encoding = self.get_encoding()
+    def get_padded_encoding(self, pad_len, rand=False):
+        encoding = self.get_encoding(rand=rand)
         padding_mask = [1 for x in encoding]  # 1s where actual nodes are
         padding_mask += [0 for x in range(pad_len - len(encoding))]
         encoding += [[0 for x in range(6)] for x in range(pad_len - len(encoding))]

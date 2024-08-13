@@ -82,22 +82,26 @@ def plot_pareto_designs(designs, pareto_plot_file, pareto_json_file):
 
 
 def plot_select_designs(problem, designs, save_dir):
-    # Viz 3 Individual Select Pareto Designs
-    if len(designs) > 3:
-        p = problem
-        design_info = [[design.get_plotting_objectives(), design.vector] for design in designs if design.objectives[0] != 0]
-        if len(design_info) < 3:
-            return
-        design_info_s = sorted(design_info, key=lambda x: x[0][0])
-        design_info_v = sorted(design_info, key=lambda x: x[0][1])
-        d_first_s = design_info_s[0]
-        d_last_s = design_info_s[-1]
-        d_first_v = design_info_v[0]
-        d_last_v = design_info_v[-1]
-        truss.rep.viz(p, d_first_s[1], f_name='d_stiff_low.png', base_dir=save_dir)
-        truss.rep.viz(p, d_last_s[1], f_name='d_stiff_high.png', base_dir=save_dir)
-        truss.rep.viz(p, d_first_v[1], f_name='d_volfrac_low.png', base_dir=save_dir)
-        truss.rep.viz(p, d_last_v[1], f_name='d_volfrac_high.png', base_dir=save_dir)
+    # Get all designs where pareto rank is 1
+    pareto_designs = [design for design in designs if design.rank == 1]
+    pareto_designs_strs = [design.get_design_str() for design in pareto_designs]
+
+    # only retain unique designs
+    pareto_designs_unique = []
+    pareto_designs_unique_strs = []
+    for idx, design in enumerate(pareto_designs):
+        if design.get_design_str() not in pareto_designs_unique_strs:
+            pareto_designs_unique.append(design)
+            pareto_designs_unique_strs.append(design.get_design_str())
+    pareto_designs = pareto_designs_unique
+
+    pareto_designs_po = [design.get_plotting_objectives() for design in pareto_designs]
+    pareto_designs_zip = list(zip(range(len(pareto_designs_po)), pareto_designs_po))
+    pareto_designs_zip = sorted(pareto_designs_zip, key=lambda x: x[1][0])
+    pareto_designs = [pareto_designs[idx] for idx, _ in pareto_designs_zip]
+
+    for idx, pd in enumerate(pareto_designs):
+        truss.rep.viz(problem, pd.vector, f_name=f'design_{idx}.png', base_dir=save_dir)
 
 
 def plot_all_designs(designs, all_plot_file):

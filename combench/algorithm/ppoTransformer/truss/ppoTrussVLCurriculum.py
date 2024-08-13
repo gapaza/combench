@@ -1,3 +1,15 @@
+# """
+#    _____                _            _                   _                           _
+#   / ____|              (_)          | |                 | |                         (_)
+#  | |    _   _ _ __ _ __ _  ___ _   _| |_   _ _ __ ___   | |     ___  __ _ _ __ _ __  _ _ __   __ _
+#  | |   | | | | '__| '__| |/ __| | | | | | | | '_ ` _ \  | |    / _ \/ _` | '__| '_ \| | '_ \ / _` |
+#  | |___| |_| | |  | |  | | (__| |_| | | |_| | | | | | | | |___|  __/ (_| | |  | | | | | | | | (_| |
+#   \_____\__,_|_|  |_|  |_|\___|\__,_|_|\__,_|_| |_| |_| |______\___|\__,_|_|  |_| |_|_|_| |_|\__, |
+#                                                                                               __/ |
+#                                                                                              |___/
+# """
+
+
 from copy import deepcopy
 import numpy as np
 import os
@@ -15,18 +27,18 @@ from combench.nn.trussDecoderVL2 import get_models
 import random
 
 # ------- Run name
-save_start_epoch = 0
-load_name = 'cantilever1-mtl-' + str(2)
-save_name = 'cantilever1-mtl-' + str(2)
-metrics_num = 0
-save_freq = 50
-plot_freq = 50
-val_freq = 50
+save_start_epoch = 9000
+load_name = 'cantilever1-mtl-' + str(21)
+save_name = 'cantilever1-mtl-' + str(21)
+metrics_num = 1
+save_freq = 100
+plot_freq = 100
+val_freq = 100
 
 NUM_PROCS = 32
 REF_POINT = np.array([0, 1])
 TRAIN_CALL = False
-RAND_NODE_ENCODING = True
+RAND_NODE_ENCODING = False
 
 # ------- Sampling parameters
 global_mini_batch_size = 128
@@ -36,7 +48,7 @@ task_epochs = 800
 max_nfe = 1e15
 clip_ratio = 0.2
 target_kl = 0.005  # was 0.005
-entropy_coef = 0.01
+entropy_coef = 0.02
 
 # ------------------------------------------------
 # Problem
@@ -52,6 +64,28 @@ from combench.models.truss.nsga2 import TrussDesign as Design
 
 from combench.models.truss.studies.cantilever1 import train_problems, val_problems, oob_problems
 val_problems_out = oob_problems
+
+nn_dict = {}
+for tp in train_problems:
+    num_nodes = len(tp['nodes'])
+    if num_nodes not in nn_dict:
+        nn_dict[num_nodes] = []
+    nn_dict[num_nodes].append(tp)
+print('Number of nodes:', nn_dict.keys())
+nn_list = list(nn_dict.keys())
+nn_idx = [
+    0,  # 4
+    1,  # 6
+    2,  # 8
+    3,  # 9
+    # 4,  # 12
+    # 5,  # 16
+]
+train_problems = []
+for nn in nn_idx:
+    train_problems += nn_dict[nn_list[nn]]
+
+print('Number of train problems:', len(train_problems))
 
 # ------------------------------------------------
 # Problem Assessment
@@ -135,6 +169,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
 
         # Update run info
         self.run_info['return'] = []
+        self.run_info['return_avg'] = []
         self.run_info['c_loss'] = []
         self.run_info['kl'] = []
         self.run_info['entropy'] = []
@@ -160,7 +195,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
 
     def run(self):
         print('Running TrussPPO')
-        self.run_val_epoch(self.val_models, 'val_hv')
+        # self.run_val_epoch(self.val_models, 'val_hv')
 
         self.curr_epoch = 0
         while self.get_total_nfe() < self.max_nfe:
@@ -178,7 +213,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
             if self.curr_epoch % plot_freq == 0:
                 self.populations[self.last_updated_task].plot_hv(self.save_dir)
                 self.populations[self.last_updated_task].plot_population(self.save_dir)
-                self.plot_metrics(['return', 'c_loss', 'kl', 'entropy', 'val_hv', 'pareto_sen'], sn=metrics_num)
+                self.plot_metrics(['return', 'return_avg', 'c_loss', 'kl', 'entropy', 'val_hv', 'pareto_sen'], sn=metrics_num)
                 # print('Time for plotting:', time.time() - curr_time)
             if self.curr_epoch % save_freq == 0:
                 self.save_models(self.curr_epoch)
@@ -534,6 +569,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
         value_loss = value_loss.numpy()
 
         self.run_info['return'].append(np.mean(all_rewards_flat))
+        self.run_info['return_avg'].append(np.mean(self.run_info['return']))
         self.run_info['c_loss'].append(value_loss)
         self.run_info['kl'].append(kl)
         self.run_info['entropy'].append(entr)

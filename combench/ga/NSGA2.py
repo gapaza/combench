@@ -98,14 +98,18 @@ class BenchNSGA2:
 class NSGA2:
 
 
-    def __init__(self, population, problem, max_nfe=1000, run_name='NSGA2'):
+    def __init__(self, population, problem, max_nfe=1000, run_name='NSGA2', save_dir=None):
         self.population = population
         self.problem = problem
         self.max_nfe = max_nfe
+        self.save_dir = save_dir
 
         # Save
         self.run_name = run_name
-        self.save_dir = os.path.join(config.results_dir, run_name)
+        if save_dir is None:
+            self.save_dir = os.path.join(config.results_dir, run_name)
+        else:
+            self.save_dir = os.path.join(save_dir, run_name)
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
@@ -120,6 +124,7 @@ class NSGA2:
         progress_bar = tqdm(total=self.max_nfe)
         curr_nfe = 0
         terminated = False
+        gen_without_nfe_increase = 0
         while terminated is False and curr_nfe < self.max_nfe:
             curr_nfe = deepcopy(self.population.nfe)
 
@@ -134,20 +139,24 @@ class NSGA2:
             #     self.population.record()
             self.population.record()
             update_delta = self.population.nfe - curr_nfe
+            if update_delta == 0:
+                gen_without_nfe_increase += 1
+            else:
+                gen_without_nfe_increase = 0
             progress_bar.update(update_delta)
             progress_bar.set_postfix({'hv': self.population.hv[-1]})
 
+            if gen_without_nfe_increase > 30:
+                terminated = True
+                print('Terminated due to no increase in NFE for 10 generations')
 
 
+        progress_bar.close()
 
         # Plot hv and population
-        print('PLOTTING POPULATION')
         self.population.plot_population(self.save_dir)
-        print('PLOTTING HV')
         self.population.plot_hv(self.save_dir)
-        print('FINISHED PLOTTING')
         results = [(nfe, hv) for nfe, hv in zip(self.population.nfes, self.population.hv)]
-        print('RULE MINING')
         # self.rule_mining()
         return results
 

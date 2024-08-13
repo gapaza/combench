@@ -4,6 +4,7 @@ import numpy as np
 import os
 import config
 import matplotlib.pyplot as plt
+import tensorflow as tf
 
 
 
@@ -112,8 +113,8 @@ class MultiTaskAlgorithm(ABC):
         self.populations[0].prune()
         self.populations[0].record()
         if self.val_run is True:
-            # print('nfe:', self.nfe, "hv: %.5f" % self.populations[0].hv[-1])
-            print('nfe:', self.nfe)
+            print('nfe:', self.nfe, "hv: %.5f" % self.populations[0].hv[-1])
+            # print('nfe:', self.nfe)
         else:
             print('')
 
@@ -150,15 +151,27 @@ class MultiTaskAlgorithm(ABC):
         # Plot each list of floats in a subplot
         for idx, (key, values) in enumerate(plot_dict.items()):
             ax = axes[idx]
-            if key != 'pareto_sen':
-                ax.plot(values)
+
+            if key == 'pareto_search':
+                beam_widths = [2, 5, 10, 20, 50]
+                labels = ['Greedy']
+                for bw in beam_widths:
+                    labels.append(str(bw) + ' Beams')
+
+                for s_idx, sens in enumerate(values):
+                    ax.plot(sens, label=labels[s_idx])
                 ax.set_title(f'{key}')
-                # Set axis range
-            else:
+                ax.legend()
+            elif key == 'pareto_sen':
                 for s_idx, sens in enumerate(values):
                     ax.plot(sens, label=str(s_idx))
                 ax.set_title(f'{key}')
                 ax.legend()
+            else:
+                ax.plot(values)
+                ax.set_title(f'{key}')
+                # Set axis range
+
 
 
 

@@ -124,7 +124,13 @@ class TrussPopulation(UnconstrainedPop):
 
         # Viz 3 Individual Select Pareto Designs
         if len(self.designs) > 5:
-            plotting.plot_select_designs(p, self.designs, save_dir)
+            pareto_dir = os.path.join(save_dir, 'pareto')
+            if not os.path.exists(pareto_dir):
+                os.makedirs(pareto_dir)
+            else:
+                for file in os.listdir(pareto_dir):
+                    os.remove(os.path.join(pareto_dir, file))
+            plotting.plot_select_designs(p, self.designs, pareto_dir)
 
         # All designs
         if len(self.unique_designs) > 0:
@@ -134,6 +140,14 @@ class TrussPopulation(UnconstrainedPop):
         if len(self.unique_designs) > 0:
             plotting.plot_weight_graph(self.unique_designs, all_weights_file)
 
+
+def run_algorithm(problem, save_dir, nfe=1000, pop_size=30):
+    model = TrussModel(problem)
+    ref_point = np.array([0, 1])
+    pop = TrussPopulation(pop_size, ref_point, model)
+    nsga2 = NSGA2(pop, model, nfe, save_dir=save_dir)
+    nsga2.run()
+    pop.eval_manager.shutdown()
 
 
 

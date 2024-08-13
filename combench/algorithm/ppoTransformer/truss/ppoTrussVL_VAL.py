@@ -4,33 +4,41 @@ import os
 import tensorflow as tf
 import tensorflow_addons as tfa
 import time
+from combench.nn import beam_search
 
 from combench.algorithm import discounted_cumulative_sums
 from combench.core.algorithm import MultiTaskAlgorithm
-from combench.nn.trussDecoderVLrag import get_models
+
+# from combench.nn.trussDecoderVL import get_models
+from combench.nn.trussDecoderVL2 import get_models
+
+from combench.nn import analyze_pareto
+
 import random
 
 # ------- Run name
-r_num = 4
-save_name = 'cantilever-NxN-pretrain-50res-flex' + str(r_num)
-load_name = 'cantilever-NxN-pretrain-50res-flex' + str(r_num)
+save_start_epoch = 2350
+load_name = 'cantilever1-mtl-' + str(2)
+save_name = 'cantilever1-mtl-' + str(12)
 metrics_num = 0
-save_freq = 50
-plot_freq = 20
+save_freq = 100
+plot_freq = 100
+val_freq = 100
 
-NUM_PROCS = 1
+NUM_PROCS = 16
+REF_POINT = np.array([0, 1])
+TRAIN_CALL = False
+RAND_NODE_ENCODING = False
 
 # ------- Sampling parameters
-num_problem_samples = 8  # 1
-num_weight_samples = 8  # 1
-global_mini_batch_size = num_problem_samples * num_weight_samples  # 4 * 4 * 4 = 64
+global_mini_batch_size = 16
 
 # -------- Training Parameters
 task_epochs = 800
 max_nfe = 1e15
 clip_ratio = 0.2
-target_kl = 0.005
-entropy_coef = 0.00
+target_kl = 0.005  # was 0.005
+entropy_coef = 0.08
 
 # ------------------------------------------------
 # Problem
@@ -44,22 +52,13 @@ from combench.models.truss.TrussModel import TrussModel as Model
 from combench.models.truss.nsga2 import TrussPopulation as Population
 from combench.models.truss.nsga2 import TrussDesign as Design
 
-train_problems, val_problems = truss.problems.Cantilever.type_2_enum({
-    'x_range': 4,
-    'y_range': 4,
-    'x_res_range': [2, 4],
-    'y_res_range': [2, 4],
-    'radii': 0.2,
-    'y_modulus': 210e9
-})
-nn_dict = {}
-for p in train_problems:
-    nn = len(p['nodes'])
-    if nn not in nn_dict:
-        nn_dict[nn] = 1
-    else:
-        nn_dict[nn] += 1
-    truss.set_norms(p)
+from combench.models.truss.studies.cantilever1 import val_problems, oob_problems
+val_problems_out = oob_problems
+
+# VAL PROBLEM
+val_problem_idx = 1
+val_problems = [val_problems[val_problem_idx]]
+
 
 # ------------------------------------------------
 # Problem Assessment
@@ -68,13 +67,13 @@ for p in train_problems:
 # for idx, vp in enumerate(val_problems):
 #     p_rep = truss.rep.random_sample_1(vp)
 #     truss.rep.viz(vp, p_rep, f_name='val_problem_' + str(idx) + '.png')
-max_problem_node_count = max([len(p['nodes']) for p in train_problems])
+max_problem_node_count = max([len(p['nodes']) for p in val_problems])
 max_num_vars = int((max_problem_node_count * (max_problem_node_count-1)) / 2)
-train_problems_node_count = [len(p['nodes']) for p in train_problems]
+train_problems_node_count = [len(p['nodes']) for p in val_problems]
 
 
 # -------- Set random seed for reproducibility
-seed_num = 5
+seed_num = 0
 random.seed(seed_num)
 tf.random.set_seed(seed_num)
 
@@ -98,8 +97,17 @@ class TrussPPOVL(MultiTaskAlgorithm):
         self.train_actor_iterations = 40  # was 250
         self.train_critic_iterations = 40  # was 40
 
-        self.actor_optimizer = tfa.optimizers.RectifiedAdam(learning_rate=self.actor_learning_rate)
-        # self.actor_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.actor_learning_rate)
+        # Scheduler
+        self.actor_learning_rate = tf.keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=0.0,
+            decay_steps=1000,
+            warmup_steps=10,
+            warmup_target=self.actor_learning_rate,
+            alpha=1.0,
+        )
+
+        # self.actor_optimizer = tfa.optimizers.RectifiedAdam(learning_rate=self.actor_learning_rate)
+        self.actor_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.actor_learning_rate)
         self.critic_optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=self.critic_learning_rate)
         self.critic_loss = tf.keras.losses.MeanSquaredError()
 
@@ -108,18 +116,18 @@ class TrussPPOVL(MultiTaskAlgorithm):
         self.actor, self.critic = get_models(self.actor_path, self.critic_path)
 
         # Objective Weights
-        num_keys = 9
-        self.objective_weights = list(np.linspace(0.05, 0.95, num_keys))
+        num_keys = 64
+        self.objective_weights = list(np.linspace(0.00, 1.00, num_keys))
 
         # PPO Parameters
         self.gamma = 0.99
-        self.lam = 0.95
+        self.lam = 0.95  # 0.95
         self.clip_ratio = clip_ratio
         self.target_kl = target_kl
         self.entropy_coef = entropy_coef
         self.mini_batch_size = global_mini_batch_size
         self.decision_start_token_id = 1
-        self.num_actions = 3
+        self.num_actions = 2
         self.curr_epoch = 0
         self.last_updated_task = 0
 
@@ -135,16 +143,21 @@ class TrussPPOVL(MultiTaskAlgorithm):
         self.run_info['c_loss'] = []
         self.run_info['kl'] = []
         self.run_info['entropy'] = []
-        self.run_info['len_error'] = []
         self.run_info['epoch_evals'] = []
+        self.run_info['val_hv'] = []
+        self.run_info['pareto_search'] = [
+            [] for _ in range(6)
+        ]
+        self.run_info['zero_shot_hv'] = []
+
 
         # Evaluation Manager
         self.eval_manager = EvaluationProcessManager(NUM_PROCS)
 
     def save_models(self, epoch=None):
         if epoch:
-            actor_save = self.actor_pretrain_save_path + '_' + str(epoch)
-            critic_save = self.critic_pretrain_save_path + '_' + str(epoch)
+            actor_save = self.actor_pretrain_save_path + '_' + str(epoch + save_start_epoch)
+            critic_save = self.critic_pretrain_save_path + '_' + str(epoch + save_start_epoch)
         else:
             actor_save = self.actor_pretrain_save_path
             critic_save = self.critic_pretrain_save_path
@@ -153,9 +166,11 @@ class TrussPPOVL(MultiTaskAlgorithm):
 
     def run(self):
         print('Running TrussPPO')
+        self.run_val_epoch(self.problems, 'zero_shot_hv')
 
         self.curr_epoch = 0
         while self.get_total_nfe() < self.max_nfe:
+
             curr_time = time.time()
             self.run_epoch()
             # print('Time for epoch:', time.time() - curr_time)
@@ -164,18 +179,36 @@ class TrussPPOVL(MultiTaskAlgorithm):
             # print('Time for record:', time.time() - curr_time)
             curr_time = time.time()
             self.curr_epoch += 1
+            if self.curr_epoch % val_freq == 0:
+                self.run_val_epoch(self.problems, 'zero_shot_hv')
             if self.curr_epoch % plot_freq == 0:
                 self.populations[self.last_updated_task].plot_hv(self.save_dir)
                 self.populations[self.last_updated_task].plot_population(self.save_dir)
-                self.plot_metrics(['return', 'c_loss', 'kl', 'entropy'], sn=metrics_num)
+                self.plot_metrics(['return', 'c_loss', 'kl', 'entropy', 'zero_shot_hv', 'pareto_search'], sn=metrics_num)
                 # print('Time for plotting:', time.time() - curr_time)
             if self.curr_epoch % save_freq == 0:
                 self.save_models(self.curr_epoch)
+
         self.eval_manager.shutdown()
         self.save_models()
 
     def get_cond_vars(self):
         problem_indices = list(range(len(self.problems)))
+
+
+        problem_indices_all = list(range(len(self.problems)))
+        problem_lens = self.problems_num_bits
+        total_bits = sum(problem_lens)
+        problem_probs = [pl / total_bits for pl in problem_lens]
+
+
+        # problem_lens_unique = list(set(problem_lens))
+        # sample_problem_len = random.choice(problem_lens_unique)
+        # problem_indices = []
+        # for pi, pl in zip(problem_indices_all, problem_lens):
+        #     if pl == sample_problem_len:
+        #         problem_indices.append(pi)
+
 
 
         # Construct conditioning tensor
@@ -187,18 +220,24 @@ class TrussPPOVL(MultiTaskAlgorithm):
         p_encoding_mask_samples_all = []
         problem_samples_idx = []
         for x in range(global_mini_batch_size):
+
+            # Sample weight
             weight = random.choice(self.objective_weights)
             sample_vars = [weight]
             cond_vars.append(sample_vars)
             weight_samples_all.append(weight)
+
+            # Sample problem
             problem_sample_idx = random.choice(problem_indices)
+            # problem_sample_idx = np.random.choice(problem_indices_all, p=problem_probs)
             problem_samples_idx.append(problem_sample_idx)
             problem_samples_all.append(self.problems[problem_sample_idx])
             population_samples_all.append(self.populations[problem_sample_idx])
-            p_enc, p_enc_mask = self.problems[problem_sample_idx].get_padded_encoding(max_problem_node_count)
+            p_enc, p_enc_mask = self.problems[problem_sample_idx].get_padded_encoding(max_problem_node_count, rand=RAND_NODE_ENCODING)
             p_encoding_samples_all.append(p_enc)
             p_encoding_mask_samples_all.append(p_enc_mask)
 
+        # print('PROBLEM SAMPLES:', problem_samples_idx)
         p_encoding_tensor = tf.convert_to_tensor(p_encoding_samples_all, dtype=tf.float32)
         p_encoding_mask_tensor = tf.convert_to_tensor(p_encoding_mask_samples_all, dtype=tf.int32)
         cond_vars_tensor = tf.convert_to_tensor(cond_vars, dtype=tf.float32)
@@ -258,78 +297,20 @@ class TrussPPOVL(MultiTaskAlgorithm):
                     action_masks[idx].append(0)      # No action
                     reward = 0.0                     # No reward
                 else:
-                    # Design is in progress, generating end token
-                    if len(curr_design) >= curr_design_num_vars:
-                        # ------------------------------
-                        # Case 2: Design is incomplete,
-                        # ------------------------------
-                        observation_new[idx].append(0)
-                        if m_action == 2:
-                            reward = 0.1
-                            designs_in_progress[idx] = False
-                        else:
-                            reward = abs((len(all_actions[idx])+1) - curr_design_num_vars) * -0.1 # Scale by number of missing vars
-                        # designs_in_progress[idx] = False  # Use to clip generations after design len.
-
-                    else:  # Token generated in design position (0 or 1)
-                        observation_new[idx].append(m_action + 2)
-                        designs[idx].append(m_action)
-                        if m_action == 2:  # Premature end token
-                            reward = abs(len(curr_design) - curr_design_num_vars) * -0.1  # Scale by number of missing vars
-                            designs_in_progress[idx] = False
-                        elif len(designs[idx]) == curr_design_num_vars:  # Evaluate the design
-                            reward = 55  # TODO: PLACEHOLDER REWARD FOR EVAL LATER
-                            complete_designs[idx] = True
-                        else:
-                            reward = 0.0
-                    # else:
-                    #     # Token generated is past valid design and end token points.
-                    #     if m_action != 2:
-                    #         reward = abs(len(all_actions[idx]) - curr_design_num_vars) * -0.01 # Scale by number of missing vars
-                    #     else:
-                    #         reward = 0.0
-                    #         complete_designs[idx] = True
-                    #     observation_new[idx].append(m_action + 2)
-
+                    observation_new[idx].append(m_action + 2)
+                    designs[idx].append(m_action)
+                    if len(designs[idx]) == curr_design_num_vars:  # Evaluate the design
+                        reward = 55  # TODO: PLACEHOLDER REWARD FOR EVAL LATER
+                        complete_designs[idx] = True
+                        designs_in_progress[idx] = False
+                    else:
+                        reward = 0.0
 
                     all_actions[idx].append(deepcopy(act))
                     all_logprobs[idx].append(action_log_prob[idx])
                     action_masks[idx].append(1)
                     all_rewards[idx].append(reward)
 
-
-
-
-
-
-                #
-                # if len(curr_design) <= curr_design_num_vars and designs_in_progress[idx] is True:  # The full design and end token have not been generated
-                #     if len(curr_design) == curr_design_num_vars:  # Token generated in end token position
-                #         observation_new[idx].append(0)
-                #         if m_action == 2:
-                #             reward = 0.1
-                #         else:
-                #             reward = -0.1
-                #         designs_in_progress[idx] = False
-                #     else:  # Token generated in design position (0 or 1)
-                #         observation_new[idx].append(m_action + 2)
-                #         designs[idx].append(m_action)
-                #         if m_action == 2:  # End token generated in a design decision position
-                #             reward = -0.1
-                #             designs_in_progress[idx] = False
-                #         elif len(designs[idx]) == curr_design_num_vars:  # Evaluate the design
-                #             reward = 55  # TODO: PLACEHOLDER REWARD FOR EVAL LATER
-                #         else:
-                #             reward = 0.0
-                #
-                #     all_actions[idx].append(deepcopy(act))
-                #     all_logprobs[idx].append(action_log_prob[idx])
-                #     action_masks[idx].append(1)
-                #     all_rewards[idx].append(reward)
-                # else:  # The design has been fully constructed
-                #     observation_new[idx].append(0)
-                #     action_masks[idx].append(0)
-                #     all_rewards[idx].append(reward)
 
             if True not in designs_in_progress:
                 done = True
@@ -344,13 +325,13 @@ class TrussPPOVL(MultiTaskAlgorithm):
                 observation = observation_new
 
 
-        # Calculate pred len error
-        pred_len_errors = []
-        for idx, design in enumerate(designs):
-            curr_design_num_vars = problems_num_vars_all[idx]
-            diff = abs(len(design) - curr_design_num_vars)
-            pred_len_errors.append(diff)
-        avg_len_error = np.mean(pred_len_errors)
+        # # Calculate pred len error
+        # pred_len_errors = []
+        # for idx, design in enumerate(designs):
+        #     curr_design_num_vars = problems_num_vars_all[idx]
+        #     diff = abs(len(design) - curr_design_num_vars)
+        #     pred_len_errors.append(diff)
+        # avg_len_error = np.mean(pred_len_errors)
 
 
         # -------------------------------------
@@ -367,18 +348,20 @@ class TrussPPOVL(MultiTaskAlgorithm):
 
         eval_designs = []
         eval_problems = []
+        eval_problems_obj = []
         eval_populations = []
         eval_designs_weights = []
         for idx, design in enumerate(designs):
             if idx in design_idx_to_eval:
                 eval_designs.append(design)
                 eval_problems.append(problem_samples_all[idx].problem_formulation)
+                eval_problems_obj.append(problem_samples_all[idx])
                 eval_populations.append(population_samples_all[idx])
                 eval_designs_weights.append(weight_samples_all[idx])
         if len(eval_designs) > 0:
             # print('Evaluating', len(eval_designs), 'designs')
             objectives = self.eval_manager.evaluate(eval_problems, eval_designs)
-            evals = self.calc_reward_batch(eval_designs, eval_designs_weights, objectives, eval_problems, eval_populations)
+            evals = self.calc_reward_batch(eval_designs, eval_designs_weights, objectives, eval_problems_obj, eval_populations)
             eval_shown = False
             for idx, (reward, design_obj) in enumerate(evals):
                 design_idx = design_idx_to_eval[idx]
@@ -562,13 +545,32 @@ class TrussPPOVL(MultiTaskAlgorithm):
         self.run_info['c_loss'].append(value_loss)
         self.run_info['kl'].append(kl)
         self.run_info['entropy'].append(entr)
-        self.run_info['len_error'].append(avg_len_error)
         self.run_info['epoch_evals'].append(len(eval_designs))
 
         # Update nfe
         self.nfe = self.get_total_nfe()
 
 
+
+    def run_val_epoch(self, val_models, val_key):
+        # This method analyzes the pareto front estimated by the fine-tuned model
+
+        val_models_hvs = []
+        print('Val problems', end=': ')
+        for idx, v_model in enumerate(val_models):
+            v_problem = v_model.problem_formulation
+
+            results, sensitivity = analyze_pareto(self.actor, v_problem, self.eval_manager)
+            val_models_hvs.append(results[0])
+            for r_idx, r in enumerate(results):
+                self.run_info['pareto_search'][r_idx].append(r)
+
+
+        self.run_info[val_key].append(np.mean(val_models_hvs))
+
+    # -------------------------------------
+    # Calc Reward
+    # -------------------------------------
 
     def calc_reward_batch(self, designs, weights, objectives, problems, populations):
 
@@ -619,7 +621,6 @@ class TrussPPOVL(MultiTaskAlgorithm):
 
         return returns
 
-
     # -------------------------------------
     # Actor-Critic Functions
     # -------------------------------------
@@ -640,8 +641,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
     ])
     def _sample_actor(self, observation_input, cross_input, inf_idx, p_encoding, p_encoding_mask):
         # print('sampling actor', inf_idx)
-        pred_probs = self.actor([observation_input, cross_input, p_encoding, p_encoding_mask],
-                                training=False)  # shape (batch, seq_len, 2)
+        pred_probs = self.actor([observation_input, cross_input, p_encoding, p_encoding_mask], training=TRAIN_CALL)  # shape (batch, seq_len, 2)
 
         # Batch sampling
         all_token_probs = pred_probs[:, inf_idx, :]  # shape (batch, 2)
@@ -700,7 +700,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
         action_mask_buffer = tf.cast(action_mask_buffer, tf.float32)
         logprobability_buffer = logprobability_buffer * action_mask_buffer
         with tf.GradientTape() as tape:
-            pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer, encoding_attn_mask], training=False)  # shape: (batch, seq_len, 2)
+            pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer, encoding_attn_mask], training=TRAIN_CALL)  # shape: (batch, seq_len, 2)
             pred_log_probs = tf.math.log(pred_probs)  # shape: (batch, seq_len, 2)
             logprobability = tf.reduce_sum(
                 tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
@@ -735,7 +735,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
         self.actor_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
 
         #  KL Divergence
-        pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer, encoding_attn_mask], training=False)  # shape: (batch, seq_len, 2
+        pred_probs = self.actor([observation_buffer, parent_buffer, p_encoding_buffer, encoding_attn_mask], training=TRAIN_CALL)  # shape: (batch, seq_len, 2
         pred_log_probs = tf.math.log(pred_probs)
         logprobability = tf.reduce_sum(
             tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
@@ -778,7 +778,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
 
         return value_loss
 
-
+import config
 
 
 if __name__ == '__main__':
@@ -787,11 +787,18 @@ if __name__ == '__main__':
     ref_point = np.array([0, 1])
 
     actor_path, critic_path = None, None
-    # actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_650')
-    # critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_650')
-    problems = [Model(deepcopy(problem), num_procs=NUM_PROCS) for problem in train_problems]
-    pops = [Population(pop_size, ref_point, problem) for idx, problem in enumerate(problems)]
-    ppo = TrussPPOVL(problems, pops, max_nfe, actor_path, critic_path, run_name=save_name)
+    if save_start_epoch > 0:
+        actor_path = os.path.join(config.results_dir, load_name, 'pretrained', 'actor_weights_' + str(save_start_epoch))
+        critic_path = os.path.join(config.results_dir, load_name, 'pretrained', 'critic_weights_' + str(save_start_epoch))
+    train_models = [Model(deepcopy(problem), num_procs=NUM_PROCS) for problem in val_problems]
+
+    # val_models = [Model(deepcopy(problem), num_procs=NUM_PROCS) for problem in val_problems]
+    # val_models_out = [Model(deepcopy(problem), num_procs=NUM_PROCS) for problem in val_problems_out]
+
+
+
+    pops = [Population(pop_size, ref_point, problem) for idx, problem in enumerate(train_models)]
+    ppo = TrussPPOVL(train_models, pops, max_nfe, actor_path, critic_path, run_name=save_name)
     ppo.run()
 
 
