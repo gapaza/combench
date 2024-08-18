@@ -85,6 +85,14 @@ class AbstractProblem(ABC):
         return p
 
 
+    @staticmethod
+    def clear_loads(problem):
+        for idx1, load_cond in enumerate(problem['load_conds']):
+            for idx2, n_load in enumerate(load_cond):
+                problem['load_conds'][idx1][idx2] = [0, 0]
+        return problem
+
+
 
 
 

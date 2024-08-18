@@ -118,6 +118,21 @@ def convert(problem, orig_rep):
     return bit_list, bit_str, node_idx_pairs, node_coords
 
 
+def get_bit_list_from_node_seq(problem, node_seq):
+    node_idx_pairs = set()
+    for i in range(len(node_seq) - 1):
+        curr_node = node_seq[i]
+        next_node = node_seq[i + 1]
+        if curr_node == next_node:
+            continue
+        n1 = min(curr_node, next_node)
+        n2 = max(curr_node, next_node)
+        node_idx_pairs.add((n1, n2))
+    node_idx_pairs = [list(x) for x in node_idx_pairs]
+    bit_list, bit_str, node_idx_pairs, node_coords = convert(problem, node_idx_pairs)
+    return bit_list
+
+
 def gcoords_to_node_idx(coords, nodes):
     for idx, node in enumerate(nodes):
         if coords[0] == node[0] and coords[1] == node[1]:

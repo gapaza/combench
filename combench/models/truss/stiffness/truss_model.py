@@ -37,7 +37,7 @@ problem = {
 
 DEBUG = False
 
-def eval_load_cond(problem, design_rep, load_conds):
+def eval_load_cond(problem, design_rep, load_conds, verbose2=False):
     extra_info = {}
     if DEBUG:
         print('\n\n----------- Evaluating Load Condition -----------')
@@ -168,6 +168,9 @@ def eval_load_cond(problem, design_rep, load_conds):
         print('Areas:', m_areas)
         print('Youngs Modulus:', y_mod)
     K = getK(used_nodes, elements, m_areas, y_mod)  # Global stiffness_old matrix
+
+    K_full = getK(np.array(all_nodes), np.array(node_idx_pairs)+1, m_areas, y_mod)
+
     K_det = np.linalg.det(K)
     if DEBUG:
         print('\nGlobal stiffness matrix:')
@@ -225,6 +228,15 @@ def eval_load_cond(problem, design_rep, load_conds):
     # 14. Calculate all nodal forces with full displacement vector
     try:
         F = K @ u
+
+        # print('\n--> evaluating truss design')
+        # print('F:', F.shape[0])
+        # print('u:', u.shape)
+        # print('K:', K.shape)
+        # exit(0)
+
+
+
     except Exception as e:
         if DEBUG:
             print('Linear alg error:', e)
@@ -234,6 +246,25 @@ def eval_load_cond(problem, design_rep, load_conds):
     # ------------------------------------------
     # DEBUG SOLVER
     # ------------------------------------------
+
+
+    F_full = np.zeros((36,))
+    u_full = np.zeros((36,))
+    if verbose2 is True:
+        u_node_num = 0  # in used nodes frame
+        for x in range(0, len(u), 2):
+            node_num = used_to_all_map[u_node_num]
+            F_full[node_num * 2] = F[x]
+            F_full[node_num * 2 + 1] = F[x + 1]
+            u_full[node_num * 2] = u[x]
+            u_full[node_num * 2 + 1] = u[x + 1]
+            u_node_num += 1
+
+        extra_info['F_full'] = F_full
+        extra_info['u_full'] = u_full
+        extra_info['K_full'] = K_full
+
+
 
     if DEBUG:
         u_node_num = 0  # in used nodes frame
@@ -283,12 +314,77 @@ def eval_load_cond(problem, design_rep, load_conds):
 
     # stiffness, extra_info = get_stiffness_old(flat_loads_used, F, u, used_to_all_map, extra_info)
 
-    stiffness, extra_info = get_stiffness(flat_loads_used, F, u, used_to_all_map, extra_info)
+    stiffness, extra_info = get_stiffness(flat_loads_used, F, u, used_to_all_map, extra_info, verbose2)
 
 
 
 
     return stiffness, extra_info
+
+
+
+
+def get_stiffness(flat_loads_used, F, u, idx_map, extra_info, verbose2=False):
+    node_stiffness = []
+    node_dists = []
+    node_forces = []
+
+    # Iterates over each node that has a load applied
+    # - For the cantilever problem, there will only be one node with a load applied
+    for idx in range(0, len(flat_loads_used), 2):
+        node_idx = idx // 2
+        node_title = 'Node ' + str(idx_map[node_idx])
+        nx_idx, ny_idx = idx, idx + 1
+        load_x = flat_loads_used[nx_idx]
+        load_y = flat_loads_used[ny_idx]
+
+        node_text = ''
+        if load_x != 0 and load_y != 0:
+            f = get_magnitude(F[nx_idx], F[ny_idx])
+            u = get_magnitude(u[nx_idx], u[ny_idx])
+        elif load_x != 0:
+            f = F[nx_idx]
+            u = u[nx_idx]
+        elif load_y != 0:
+            f = F[ny_idx]
+            u = u[ny_idx]
+        else:  # No load applied
+            continue
+        node_text = f'{f:.2e} N | {u:.2e} m'
+        extra_info[node_title] = node_text
+
+        if u == 0:
+            node_stiffness.append(0)
+        else:
+            node_stiffness.append(f / u)
+        node_dists.append(abs(u))
+        node_forces.append(abs(f))
+
+
+    if verbose2 is True:
+        extra_info['node_dists'] = node_dists
+        extra_info['node_forces'] = node_forces
+
+    # Metric 1: Total Stiffness
+    t_dist = sum(node_dists)
+    if t_dist == 0:
+        t_stiff = 0
+    else:
+        t_stiff = sum(node_forces) / t_dist
+
+    # Metric 2: Node-wise Stiffness
+    n_stiff = sum(node_stiffness)
+
+    return t_stiff, extra_info
+
+
+
+def get_magnitude(x_comp, y_comp):
+    mag = (x_comp**2) + (y_comp**2)
+    return math.sqrt(mag)
+
+
+
 
 
 
@@ -316,66 +412,6 @@ def get_stiffness_old(flat_loads_used, F, u, used_to_all_map, extra_info):
         return 0, extra_info
     stiffness = sum(stiffness_vals)
     return stiffness, extra_info
-
-
-def get_stiffness(flat_loads_used, F, u, idx_map, extra_info):
-    node_stiffness = []
-    node_dists = []
-    node_forces = []
-    for idx in range(0, len(flat_loads_used), 2):
-        node_idx = idx // 2
-        node_title = 'Node ' + str(idx_map[node_idx])
-        nx_idx, ny_idx = idx, idx + 1
-        load_x = flat_loads_used[nx_idx]
-        load_y = flat_loads_used[ny_idx]
-
-        node_text = ''
-        if load_x != 0 and load_y != 0:
-            f = get_magnitude(F[nx_idx], F[ny_idx])
-            u = get_magnitude(u[nx_idx], u[ny_idx])
-        elif load_x != 0:
-            f = F[nx_idx]
-            u = u[nx_idx]
-        elif load_y != 0:
-            f = F[ny_idx]
-            u = u[ny_idx]
-        else:
-            continue
-        node_text = f'{f:.2e} N | {u:.2e} m'
-        extra_info[node_title] = node_text
-
-        if u == 0:
-            node_stiffness.append(0)
-        else:
-            node_stiffness.append(f / u)
-        node_dists.append(abs(u))
-        node_forces.append(abs(f))
-
-    # Metric 1: Total Stiffness
-    t_dist = sum(node_dists)
-    if t_dist == 0:
-        t_stiff = 0
-    else:
-        t_stiff = sum(node_forces) / t_dist
-
-    # Metric 2: Node-wise Stiffness
-    n_stiff = sum(node_stiffness)
-
-    return t_stiff, extra_info
-
-
-
-def get_magnitude(x_comp, y_comp):
-    mag = (x_comp**2) + (y_comp**2)
-    return math.sqrt(mag)
-
-
-
-
-
-
-
-
 
 
 

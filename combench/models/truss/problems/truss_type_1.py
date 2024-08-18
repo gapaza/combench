@@ -7,12 +7,12 @@ from itertools import combinations
 
 node_loads_enum = [
     [-1, 0],
-    [0, -1],
-    [1, 0],
-    [0, 1],
-    [1, 1],
+    # [0, -1],
+    # [1, 0],
+    # [0, 1],
+    # [1, 1],
     [-1, -1],
-    [1, -1],
+    # [1, -1],
     [-1, 1]
 ]
 
@@ -174,17 +174,9 @@ if __name__ == '__main__':
         'radii': 0.2,
         'y_modulus': 210e9
     })
-    random.seed(4)
-    problem_set = random.sample(problem_set, 64)
-    print('NUM PROBLEMS:', len(problem_set))
+    print('Problem set:', len(problem_set))
+
     problem = problem_set[0]
+    design = [1 for x in range(truss.rep.get_num_bits(problem))]
+    truss.rep.viz(problem, design, f_name='truss_type1.png')
 
-    from combench.models.truss import rep
-
-    design_rep = [int(1) for x in range(rep.get_num_bits(problem))]
-    # design_rep = '001010111110000101111111011110101111011101000000000000111001001101011111001011110001001010101011110101101100000011001011'
-    # design_rep = [int(x) for x in design_rep]
-    design_rep = [
-        (0, 1), (0, 6)
-    ]
-    rep.viz(problem, design_rep, f'problems/{TrussType1.__name__}.png')

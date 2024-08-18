@@ -157,12 +157,13 @@ if __name__ == '__main__':
 
     # from combench.models.truss import train_problems, val_problems
     # v_problem = val_problems[2]
-    val_num = 8
+    val_num = 1
     # for val_num in range(2, 8):
-    from combench.models.truss.problems.cantilever import get_problems
-    train_problems, val_problems, val_problems_out = get_problems()
-    v_problem = val_problems[val_num]
-    truss.set_norms(v_problem)
+    # from combench.models.truss.problems.cantilever import get_problems
+    # train_problems, val_problems, val_problems_out = get_problems()
+    # v_problem = val_problems[val_num]
+    # truss.set_norms(v_problem)
+    from combench.nn.trussDecoderUMD import problem as v_problem
 
     # Population
     p_model = TrussModel(v_problem)

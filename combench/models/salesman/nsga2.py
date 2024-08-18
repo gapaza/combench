@@ -13,10 +13,10 @@ class TSDesign(Design):
 
     def random_design(self):
         design = []
-        for i in range(self.problem.num_cities):
-            city_num = random.randint(0, self.problem.num_cities - 1)
+        for i in range(self.problem.total_node_slots):
+            city_num = random.randint(0, self.problem.total_node_slots - 1)
             while city_num in design:
-                city_num = random.randint(0, self.problem.num_cities - 1)
+                city_num = random.randint(0, self.problem.total_node_slots - 1)
             design.append(city_num)
         return design
 
@@ -24,7 +24,7 @@ class TSDesign(Design):
         prob_mutate = 1.0 / self.num_vars
         for i in range(self.num_vars):
             if random.random() < prob_mutate:
-                self.vector[i] = random.randint(0, self.problem.num_cities - 1)
+                self.vector[i] = random.randint(0, self.problem.total_node_slots - 1)
 
     def evaluate(self):
         if self.is_evaluated():

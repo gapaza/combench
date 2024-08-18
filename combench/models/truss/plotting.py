@@ -19,7 +19,7 @@ def plot_weight_graph(designs, save_file):
 
     all_weights = [design.weight for design in designs]
     all_weights = list(set(all_weights))
-    all_weights.sort()
+    all_weights.sort(reverse=True)
 
     # Create GridSpec layout
     rows, cols = 3, 3

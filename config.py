@@ -44,6 +44,10 @@ if not os.path.exists(plots_features_dir):
     os.makedirs(plots_features_dir)
 
 
+datasets_dir = os.path.join(root_dir, 'datasets')
+if not os.path.exists(datasets_dir):
+    os.makedirs(datasets_dir)
+
 
 sidenum = 3  # 3 | 4 | 5 | 6
 sidenum_nvar_map = {2: 6, 3: 30, 4: 108, 5: 280, 6: 600, 7: 1134, 8: 1960, 9: 3168, 10: 4860, 11: 7150, 12: 10164, 13: 14040, 14: 18928, 15: 24990, 16: 32400, 17: 41344, 18: 52020, 19: 64638, 20: 79420}

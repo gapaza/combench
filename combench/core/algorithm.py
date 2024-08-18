@@ -110,11 +110,17 @@ class MultiTaskAlgorithm(ABC):
                         print("%s: %.5f" % (key, value[-1]), end=' | ')
             else:
                 print("%s: %.5f" % (key, value), end=' | ')
+
         self.populations[0].prune()
         self.populations[0].record()
+
+        self.populations[20].prune()
+        self.populations[20].record()
+
         if self.val_run is True:
-            print('nfe:', self.nfe, "hv: %.5f" % self.populations[0].hv[-1])
+            # print('nfe:', self.nfe, "hv: %.5f" % self.populations[0].hv[-1])
             # print('nfe:', self.nfe)
+            print('')
         else:
             print('')
 
@@ -139,6 +145,7 @@ class MultiTaskAlgorithm(ABC):
         num_plots = len(plot_dict)
         # Define number of columns
         num_columns = 3
+
         # Calculate number of rows needed
         num_rows = (num_plots + num_columns - 1) // num_columns
 

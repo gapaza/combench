@@ -21,21 +21,22 @@ all_node_load_conds = [
 ]
 
 
-def get_problems():
-    params = {
-        'x_range': 4,
-        'y_range': 4,
-        'x_res_range': [2, 4],
-        'y_res_range': [2, 4],
-        'radii': 0.2,
-        'y_modulus': 210e9
-    }
+def get_problems(params=None, sample_size=6):
+    if params is None:
+        params = {
+            'x_range': 4,
+            'y_range': 4,
+            'x_res_range': [2, 4],
+            'y_res_range': [2, 4],
+            'radii': 0.2,
+            'y_modulus': 210e9
+        }
     train_problems, val_problems, val_problems_out = Cantilever.enumerate(
         params,
         p_type='type2',
         dropout=0.0,
         seed=0,
-        sample_size=6
+        sample_size=sample_size
     )
     print('\n\n---------------------------- Problem Set')
     print('--- Train Problems:', len(train_problems))
@@ -161,7 +162,7 @@ class Cantilever(AbstractProblem):
     # ----------------------------------------------------------
     # Type 2
     #   Fixed Parameters
-    #   - node mesh
+    #   - rectangular mesh
     #   - member radii
     #   - young's modulus
     #   - fixed nodes (left side)
@@ -250,6 +251,12 @@ if __name__ == '__main__':
         design_rep = [1 for _ in range(truss.rep.get_num_bits(vp))]
         f_name = f'val_{idx}.png'
         truss.rep.viz(vp, design_rep, f_name=f_name, base_dir=b_dir)
+
+    for idx, tp in enumerate(t_problems):
+        truss.set_norms(tp)
+        design_rep = [1 for _ in range(truss.rep.get_num_bits(tp))]
+        f_name = f'train_{idx}.png'
+        truss.rep.viz(tp, design_rep, f_name=f_name, base_dir=b_dir)
 
 
 

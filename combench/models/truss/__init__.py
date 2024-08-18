@@ -27,7 +27,7 @@ VOLFRAC_MIN, VOLFRAC_MAX = None, None
 from combench.models.truss.vol.c_geometry import vox_space, vox_space_trivial
 from combench.models.truss.stiffness.truss_model import eval_load_cond
 
-def eval_stiffness(problem, design_rep, normalize=False, verbose=False):
+def eval_stiffness(problem, design_rep, normalize=False, verbose=False, verbose2=False):
 
     # 1. Validate load conditions
     if 'load_conds' not in problem:
@@ -65,7 +65,7 @@ def eval_stiffness(problem, design_rep, normalize=False, verbose=False):
     stiff_vals = []
     stiff_model_info = []
     for load_conds in problem['load_conds']:
-        stiff, extra_info = eval_load_cond(problem, design_rep, load_conds)
+        stiff, extra_info = eval_load_cond(problem, design_rep, load_conds, verbose2=verbose2)
         stiff_vals.append(stiff)
         stiff_model_info.append(extra_info)
 
