@@ -17,7 +17,7 @@ from combench.nn import analyze_pareto
 import random
 
 # ------- Run name
-save_start_epoch = 600
+save_start_epoch = 0
 load_name = 'cantilever-mtl-' + str(100)
 save_name = 'cantilever-mtl-' + str(100)
 metrics_num = 0
@@ -61,8 +61,8 @@ from combench.models.truss.nsga2 import TrussDesign as Design
 
 
 # VAL PROBLEM
-# val_problems = [problem]
-val_problems = train_problems
+val_problems = [problem]
+# val_problems = train_problems
 for p in val_problems:
     truss.set_norms(p)
 
@@ -106,7 +106,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
         self.actor_learning_rate = 0.0005  # 0.0001
         self.critic_learning_rate = 0.0005  # 0.0001
         self.train_actor_iterations = 40  # was 250
-        self.train_critic_iterations = 40  # was 40
+        self.train_critic_iterations = 80  # was 40
 
         # Scheduler
         self.actor_learning_rate = tf.keras.optimizers.schedules.CosineDecay(
@@ -325,6 +325,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
 
 
         # print('GENERATING DESIGNS:')
+        curr_time = time.time()
 
         for t in range(max_design_len):
             action_log_prob, action, all_action_probs = self.sample_actor(observation, cond_vars_tensor, p_encoding_tensor, p_encoding_mask_tensor, cross_neuron_obs)  # returns shape: (batch,) and (batch,)
@@ -424,10 +425,11 @@ class TrussPPOVL(MultiTaskAlgorithm):
                 observation = observation_new
 
 
-
+        print('Time to generate designs:', time.time() - curr_time)
         # -------------------------------------
         # Evaluate Designs
         # -------------------------------------
+        curr_time = time.time()
 
         critic_observation_buffer = deepcopy(observation_new)
 
@@ -495,12 +497,14 @@ class TrussPPOVL(MultiTaskAlgorithm):
         #         truss.rep.viz(prob, design_bit_list, f_name='design_' + str(idx) + '.png', base_dir=config.plots_dir)
         # exit(0)
 
+        print('Time to evaluate designs:', time.time() - curr_time)
 
 
 
         # -------------------------------------
         # Sample Critic
         # -------------------------------------
+        curr_time = time.time()
 
         # Max critic obs len
         max_critic_obs_len = max([len(obs) for obs in critic_observation_buffer])
@@ -526,6 +530,8 @@ class TrussPPOVL(MultiTaskAlgorithm):
             all_v_mask = [1 for _ in range(len(all_v))]
             all_values_mask.append(all_v_mask)
         all_values_mask = self.pad_to_len(all_values_mask, max_critic_obs_len, pad_val=0)
+
+        print('Time to sample critic:', time.time() - curr_time)
 
 
         # -------------------------------------
@@ -606,6 +612,7 @@ class TrussPPOVL(MultiTaskAlgorithm):
         # -------------------------------------
         # Train Actor
         # -------------------------------------
+        curr_time = time.time()
 
         # print('\n\n----------- INPUTS')
         # print('Observations:', all_observations_tensor.shape)
@@ -640,11 +647,13 @@ class TrussPPOVL(MultiTaskAlgorithm):
         policy_loss = policy_loss.numpy()
         actor_loss = actor_loss.numpy()
         # print('finished training actor')
+        print('Time to train actor:', time.time() - curr_time, 'Policy Updates:', policy_update_itr)
 
 
         # -------------------------------------
         # Train Critic
         # -------------------------------------
+        curr_time = time.time()
 
         for i in range(self.train_critic_iterations):
             value_loss = self.train_critic(
@@ -657,6 +666,8 @@ class TrussPPOVL(MultiTaskAlgorithm):
                 cross_neuron_obs
             )
         value_loss = value_loss.numpy()
+
+        print('Time to train critic:', time.time() - curr_time)
 
 
         seq_lens = tf.reduce_sum(all_actions_masks_tensor, axis=-1)  # (batch,)

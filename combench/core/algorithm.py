@@ -114,8 +114,8 @@ class MultiTaskAlgorithm(ABC):
         self.populations[0].prune()
         self.populations[0].record()
 
-        self.populations[20].prune()
-        self.populations[20].record()
+        # self.populations[20].prune()
+        # self.populations[20].record()
 
         if self.val_run is True:
             # print('nfe:', self.nfe, "hv: %.5f" % self.populations[0].hv[-1])

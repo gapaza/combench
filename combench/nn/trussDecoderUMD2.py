@@ -159,27 +159,6 @@ class TrussDecoderUMD(tf.keras.Model):
         self.num_heads = actor_heads
         self.dense_dim = actor_dense
 
-        # Conditioning Vector Positional Encoding
-        # self.pos_embedding = SinePositionEncoding(name='positional_encoding')
-        # self.pos_embedding = PositionEmbedding(
-        #     sequence_length=self.gen_design_seq_length,
-        #     initializer=clone_initializer("uniform"),
-        #     name="position_embedding",
-        # )
-        # self.slot_embedding = ReversibleEmbedding(
-        #     self.vocab_size,
-        #     8,
-        #     embeddings_initializer=clone_initializer("uniform"),
-        #     mask_zero=True,
-        #     name="slot_embedding",
-        # )
-        # self.slot_embedding = TokenAndPositionEmbedding(
-        #     self.vocab_size,
-        #     self.gen_design_seq_length,
-        #     8,
-        #     mask_zero=True
-        # )
-
         # Token + Position embedding
         self.design_embedding_layer = TokenAndPositionEmbedding(
             self.vocab_size,
