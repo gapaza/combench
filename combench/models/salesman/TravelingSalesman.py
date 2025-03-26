@@ -104,6 +104,9 @@ class TravelingSalesman(Model):
         total_distance = 0
         num_cities_visited = len(design)
         if num_cities_visited > self.num_cities:
+            # print('Num cities visited: {}'.format(num_cities_visited))
+            # print('Num cities: {}'.format(self.num_cities))
+            # print('Design: {}'.format(design))
             raise ValueError('The number of cities visited cannot exceed the total number of cities')
 
         # If any cities are unvisited, determine which
@@ -118,10 +121,10 @@ class TravelingSalesman(Model):
             city1 = self.cities[design[i]]
             city2 = self.cities[design[i + 1]]
             dist = math.sqrt(abs(city1[0] - city2[0]) ** 2) + (abs(city1[1] - city2[1]) ** 2)
-            if city2 in unique_cities_visited:
-                dist += 2.0
-            if city1 == city2:
-                dist += 2.0
+            # if city2 in unique_cities_visited:
+            #     dist += 2.0
+            # if city1 == city2:
+            #     dist += 2.0
             unique_cities_visited.add(city1)
             total_distance += dist
         # print('Tour distance: {}'.format(total_distance))
@@ -147,6 +150,10 @@ class TravelingSalesman(Model):
         total_cost += cost
 
         return total_distance, total_cost
+
+    @staticmethod
+    def calc_distance(city1, city2):
+        return math.sqrt(abs(city1[0] - city2[0]) ** 2) + (abs(city1[1] - city2[1]) ** 2)
 
 
 from combench.models.salesman import problem1

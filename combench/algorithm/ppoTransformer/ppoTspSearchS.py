@@ -7,24 +7,26 @@ import tensorflow_addons as tfa
 
 import config
 from combench.core.algorithm import MultiTaskAlgorithm
-from combench.algorithm.nn.tspDecoder import get_models
+from combench.algorithm.nn.tspDecoderS import get_models, max_cities
 from combench.algorithm import discounted_cumulative_sums
 import random
 
 # ------- Run name
-save_name = 'tsp-search-problem1-r2'
-metrics_num = 0
+save_name = 'tsp-search-s'
+metrics_num = 5
 
 # ------- Sampling parameters
-num_problem_samples = 32  # 1
+num_problem_samples = 8  # 1
 repeat_size = 4  # 3
 global_mini_batch_size = num_problem_samples * repeat_size  # 12
+
 
 # -------- Training Parameters
 max_nfe = 1e15
 clip_ratio = 0.2
 target_kl = 0.001
-entropy_coef = 0.2
+entropy_coef = 0.1
+reward_coef = 0.1
 
 # -------- Problem
 opt_dir = ['min']
@@ -33,8 +35,7 @@ from combench.models.salesman.TravelingSalesman import TravelingSalesman as Mode
 from combench.models.salesman.nsga2 import TSPopulation as Population
 from combench.models.salesman.nsga2 import TSDesign as Design
 from combench.models.salesman import load_problem_set, generate_problem_set
-from combench.models.salesman import problem1 as problem
-num_cities = len(problem['cities'])
+num_cities = [4, 15]
 
 # -------- Set random seed for reproducibility
 seed_num = 1
@@ -81,7 +82,7 @@ class TspPPO(MultiTaskAlgorithm):
 
 
         # Get number of design variables
-        self.num_vars = len(self.problems[0].random_design())
+        # self.num_vars = len(self.problems[0].random_design())
         self.actor, self.critic = get_models(self.actor_path, self.critic_path)
 
         # PPO Parameters
@@ -91,8 +92,8 @@ class TspPPO(MultiTaskAlgorithm):
         self.target_kl = target_kl
         self.entropy_coef = entropy_coef
         self.mini_batch_size = global_mini_batch_size
-        self.decision_start_token_id = 1
-        self.num_actions = num_cities
+        self.decision_start_token_id = [-1, -1]
+        self.num_actions = max_cities
         self.curr_epoch = 0
 
         # Pretrain save dir
@@ -108,8 +109,8 @@ class TspPPO(MultiTaskAlgorithm):
         self.run_info['kl'] = []
         self.run_info['entropy'] = []
         self.run_info['avg_dist'] = []
-        # self.run_info['min_dist'] = []
-        # self.run_info['problems'] = []
+        self.run_info['n_cities'] = []
+        self.run_info['design'] = []
 
     def run(self):
         print('Running TspPPO')
@@ -133,7 +134,12 @@ class TspPPO(MultiTaskAlgorithm):
                 self.critic.save_weights(t_critic_save_path)
 
     def get_cond_vars(self):
-        rnd_problems = generate_problem_set(num_problem_samples, num_cities)
+        # Determine how many cities each problem should have
+        batch_cities = random.randint(num_cities[0], num_cities[1])
+        # batch_cities = get_num_cities(self.curr_epoch)
+        # print('Batch Cities:', batch_cities)
+
+        rnd_problems = generate_problem_set(num_problem_samples, batch_cities)
         self.problems = [Model(problem) for problem in rnd_problems]
         self.populations = [Population(50, np.array([1, 1]), problem) for problem in self.problems]
 
@@ -157,7 +163,10 @@ class TspPPO(MultiTaskAlgorithm):
         population_samples_all = [element for element in population_samples_all for _ in range(repeat_size)]
         cond_vars = [element for element in cond_vars for _ in range(repeat_size)]
         cond_vars_tensor = tf.convert_to_tensor(cond_vars, dtype=tf.float32)  # (num_problem_samples, num_cities, 2)
-        return cond_vars_tensor, problem_samples_all, population_samples_all, problem_indices_all
+
+        enc_attn_mask = tf.ones((global_mini_batch_size, batch_cities), dtype=tf.float32)
+
+        return cond_vars_tensor, problem_samples_all, population_samples_all, problem_indices_all, enc_attn_mask, batch_cities
 
     def run_epoch(self):
         new_designs = []
@@ -167,7 +176,6 @@ class TspPPO(MultiTaskAlgorithm):
         all_rewards = [[] for _ in range(self.mini_batch_size)]
         all_logprobs = [[] for _ in range(self.mini_batch_size)]
         designs = [[] for x in range(self.mini_batch_size)]
-        epoch_designs = []
         observation = [[self.decision_start_token_id] for x in range(self.mini_batch_size)]
         critic_observation_buffer = [[] for x in range(self.mini_batch_size)]
         all_dists = []
@@ -175,33 +183,44 @@ class TspPPO(MultiTaskAlgorithm):
         num_infeasible = 0
 
         # Get conditioning variables
-        cond_vars_tensor, problem_samples_all, population_samples_all, problem_indices_all = self.get_cond_vars()
+        cond_vars_tensor, problem_samples_all, population_samples_all, problem_indices_all, enc_attn_mask, batch_cities = self.get_cond_vars()
         # print('Problem Indices:', problem_indices_all)
 
-
-        for t in range(self.num_vars):
-            action_log_prob, action, all_action_probs = self.sample_actor(observation, cond_vars_tensor)  # returns shape: (batch,) and (batch,)
+        for t in range(batch_cities):
+            # print('Iteration:', t)
+            action_log_prob, action, all_action_probs = self.sample_actor(observation, cond_vars_tensor, enc_attn_mask, batch_cities, t)  # returns shape: (batch,) and (batch,)
             action_log_prob = action_log_prob.numpy().tolist()
 
             observation_new = deepcopy(observation)
-            for idx, act in enumerate(action.numpy()):
-                all_actions[idx].append(deepcopy(act))
-                all_logprobs[idx].append(action_log_prob[idx])
+            illegal_actions = []
+            for idx1, act in enumerate(action.numpy()):
+                problem_obj = problem_samples_all[idx1]
+                problem_cities = problem_obj.cities
+
+                # Determine if action is illegal
                 m_action = int(deepcopy(act))
-                designs[idx].append(m_action)
-                observation_new[idx].append(m_action + 2)
+                if m_action >= len(problem_cities):
+                    m_action = 0
+                    illegal_actions.append(True)
+                elif act in all_actions[idx1]:
+                    illegal_actions.append(True)
+                else:
+                    illegal_actions.append(False)
+
+                all_actions[idx1].append(deepcopy(act))
+                all_logprobs[idx1].append(action_log_prob[idx1])
+                designs[idx1].append(m_action)
+                selected_city = problem_cities[m_action]
+                observation_new[idx1].append(deepcopy(selected_city))
 
             # Determine reward for each batch element
-            if len(designs[0]) == self.num_vars:
+            if len(designs[0]) == batch_cities:
                 done = True
                 for idx, design in enumerate(designs):
-                    # Record design
-                    design_bitstr = ''.join([str(bit) for bit in design])
-                    epoch_designs.append(design_bitstr)
 
                     # Evaluate design
-                    reward, design_obj = self.calc_reward(
-                        design_bitstr,
+                    reward, design_obj, total_reward = self.calc_reward(
+                        design,
                         problem_samples_all[idx],
                         population_samples_all[idx]
                     )
@@ -211,11 +230,24 @@ class TspPPO(MultiTaskAlgorithm):
                     else:
                         num_infeasible += 1
                     all_rewards[idx].append(reward)
-                    all_total_rewards.append(reward)
+                    all_total_rewards.append(total_reward)
             else:
                 done = False
-                reward = 0.0
-                for idx, _ in enumerate(designs):
+                for idx, design_fragment in enumerate(designs):
+                    if len(design_fragment) <= 1:
+                        reward = 0.0
+                    else:
+                        problem_cities = problem_samples_all[idx].cities
+                        city1 = problem_cities[design_fragment[-2]]
+                        city2 = problem_cities[design_fragment[-1]]
+                        distance = Model.calc_distance(city1, city2)
+                        reward = -distance
+                        reward = reward * reward_coef
+
+                    action_illegal = illegal_actions[idx]
+                    if action_illegal is True:
+                        reward += -0.05
+
                     all_rewards[idx].append(reward)
 
             # Update the observation
@@ -230,12 +262,16 @@ class TspPPO(MultiTaskAlgorithm):
         # else:
         #     print('No feasible designs found')
 
+        rewards_tensor = tf.convert_to_tensor(all_rewards, dtype=tf.float32)  # (batch , seq_len)
+        rewards_tensor = tf.reduce_sum(rewards_tensor, axis=-1)  # (batch,)
+        avg_reward = tf.reduce_mean(rewards_tensor).numpy()
+
         # -------------------------------------
         # Sample Critic
         # -------------------------------------
 
         # --- SINGLE CRITIC PREDICTION --- #
-        value_t = self.sample_critic(critic_observation_buffer, cond_vars_tensor)
+        value_t = self.sample_critic(critic_observation_buffer, cond_vars_tensor, enc_attn_mask)
         value_t = value_t.numpy().tolist()  # (30, 31)
         for idx, value in zip(range(self.mini_batch_size), value_t):
             last_reward = value[-1]
@@ -280,6 +316,7 @@ class TspPPO(MultiTaskAlgorithm):
         # Train Actor
         # -------------------------------------
 
+        num_actions_tensor = tf.convert_to_tensor(deepcopy(batch_cities), dtype=tf.int32)
         policy_update_itr = 0
         for i in range(self.train_actor_iterations):
             policy_update_itr += 1
@@ -288,7 +325,9 @@ class TspPPO(MultiTaskAlgorithm):
                 action_tensor,
                 logprob_tensor,
                 advantage_tensor,
-                cond_vars_tensor
+                cond_vars_tensor,
+                enc_attn_mask,
+                num_actions_tensor
             )
             if kl > 1.5 * self.target_kl:
                 # Early Stopping
@@ -307,6 +346,7 @@ class TspPPO(MultiTaskAlgorithm):
                 critic_observation_tensor,
                 return_tensor,
                 cond_vars_tensor,
+                enc_attn_mask
             )
         value_loss = value_loss.numpy()
 
@@ -318,7 +358,7 @@ class TspPPO(MultiTaskAlgorithm):
         if min_distance is None:
             min_distance = 100
 
-        self.run_info['return'].append(np.mean(all_total_rewards))
+        self.run_info['return'].append(avg_reward)
         self.run_info['c_loss'].append(value_loss)
         self.run_info['kl'].append(kl)
         self.run_info['entropy'].append(entr)
@@ -327,59 +367,82 @@ class TspPPO(MultiTaskAlgorithm):
         self.run_info['avg_dist'].append(np.mean(all_dists))
         # self.run_info['min_dist'].append(min_distance)
         # self.run_info['problems'] = problem_indices_all
-
+        self.run_info['n_cities'].append(deepcopy(batch_cities))
+        self.run_info['design'].append(deepcopy(designs[-1]))
 
         # Update nfe
         self.nfe = self.get_total_nfe()
+
+        # print('Design:', designs[0])
+
 
     # -------------------------------------
     # Reward
     # -------------------------------------
 
-    def calc_reward(self, tour_bitstr, problem, population):
-        tour_bitlst = [int(bit) for bit in tour_bitstr]
+    def calc_reward(self, tour_bitlst, problem, population):
+        # print('Tour:', tour_bitlst)
 
         design = Design(tour_bitlst, problem)
         design = population.add_design(design)
-        if design.is_feasible is True:
-            reward = -design.objectives[0]
-        else:
-            reward = -5
-            unique_cities_visited = set()
-            for i in range(len(tour_bitlst)):
-                city = tour_bitlst[i]
-                if city not in unique_cities_visited:
-                    reward += 0.1
-                    unique_cities_visited.add(city)
-                else:
-                    break
-        reward = reward * 0.1
-        return reward, design
+        total_reward = -design.objectives[0] * reward_coef
+
+
+        # Find distance from last city to second last city
+        city_l1 = problem.cities[tour_bitlst[-1]]
+        city_l2 = problem.cities[tour_bitlst[-2]]
+        distance = Model.calc_distance(city_l1, city_l2)
+
+        # Add distance if tour has not visited all cities
+        tour_cities_visited = set(tour_bitlst)
+        unvisited_cities = list(set(range(problem.num_cities)) - set(tour_bitlst))
+        if len(unvisited_cities) > 0:
+            # Add tour_bitlst[-1] to beginning of unvisited_cities
+            unvisited_cities.insert(0, tour_bitlst[-1])
+            unvisited_cities.append(tour_bitlst[0])  # Returning to starting city
+            for i in range(len(unvisited_cities) - 1):
+                city1 = problem.cities[unvisited_cities[i]]
+                city2 = problem.cities[unvisited_cities[i + 1]]
+                distance += Model.calc_distance(city1, city2)
+
+        reward = -distance
+        reward = reward * reward_coef
+
+        return reward, design, total_reward
 
     # -------------------------------------
     # Actor-Critic Functions
     # -------------------------------------
 
-    def sample_actor(self, observation, cross_obs):
+    def sample_actor(self, observation, cross_obs, enc_attn_mask, batch_cities, samp_idx):
         inf_idx = len(observation[0]) - 1  # all batch elements have the same length
         observation_input = deepcopy(observation)
         observation_input = tf.convert_to_tensor(observation_input, dtype=tf.float32)
         inf_idx = tf.convert_to_tensor(inf_idx, dtype=tf.int32)
-        return self._sample_actor(observation_input, cross_obs, inf_idx)
+        batch_cities_tensor = tf.convert_to_tensor(batch_cities, dtype=tf.int32)
+        # if samp_idx == 0:
+        #     return self._sample_actor_rnd(observation_input, cross_obs, inf_idx, enc_attn_mask, batch_cities_tensor)
+        # else:
+        #     return self._sample_actor(observation_input, cross_obs, inf_idx, enc_attn_mask, batch_cities_tensor)
+        return self._sample_actor(observation_input, cross_obs, inf_idx, enc_attn_mask, batch_cities_tensor)
 
     @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, None)
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, None)
         tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, 1)
-        tf.TensorSpec(shape=(), dtype=tf.int32)
+        tf.TensorSpec(shape=(), dtype=tf.int32),
+        tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(), dtype=tf.int32),
     ])
-    def _sample_actor(self, observation_input, cross_input, inf_idx):
+    def _sample_actor(self, observation_input, cross_input, inf_idx, enc_attn_mask, batch_cities_tensor):
         # print('sampling actor', inf_idx)
-        pred_probs = self.actor([observation_input, cross_input])
+        pred_probs = self.actor([observation_input, cross_input, enc_attn_mask])
 
         # Batch sampling
         all_token_probs = pred_probs[:, inf_idx, :]  # shape (batch, 2)
+        # all_token_probs = pred_probs[:, inf_idx, :batch_cities_tensor]  # shape (batch, 2)
         all_token_log_probs = tf.math.log(all_token_probs + 1e-10)
         samples = tf.random.categorical(all_token_log_probs, 1)  # shape (batch, 1)
+
         next_bit_ids = tf.squeeze(samples, axis=-1)  # shape (batch,)
         batch_indices = tf.range(0, tf.shape(all_token_log_probs)[0], dtype=tf.int64)  # shape (batch,)
         next_bit_probs = tf.gather_nd(all_token_log_probs, tf.stack([batch_indices, next_bit_ids], axis=-1))
@@ -388,28 +451,60 @@ class TspPPO(MultiTaskAlgorithm):
         actions_log_prob = next_bit_probs  # (batch,)
         return actions_log_prob, actions, all_token_probs
 
-    def sample_critic(self, observation, parent_obs):
+    @tf.function(input_signature=[
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, None)
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),  # shape=(global_mini_batch_size, 1)
+        tf.TensorSpec(shape=(), dtype=tf.int32),
+        tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(), dtype=tf.int32),
+    ])
+    def _sample_actor_rnd(self, observation_input, cross_input, inf_idx, enc_attn_mask, batch_cities_tensor):
+        # print('sampling actor', inf_idx)
+        pred_probs = self.actor([observation_input, cross_input, enc_attn_mask])
+
+        # Batch sampling
+        all_token_probs = pred_probs[:, inf_idx, :]  # shape (batch, 2)
+        # all_token_probs = pred_probs[:, inf_idx, :batch_cities_tensor]  # shape (batch, 2)
+        all_token_log_probs = tf.math.log(all_token_probs + 1e-10)
+
+        uniform_log_prob = -tf.math.log(tf.cast(batch_cities_tensor, tf.float32))
+        all_token_log_probs = tf.ones_like(pred_probs[:, inf_idx, :]) * uniform_log_prob
+
+        samples = tf.random.categorical(all_token_log_probs, 1)  # shape (batch, 1)
+
+        next_bit_ids = tf.squeeze(samples, axis=-1)  # shape (batch,)
+        batch_indices = tf.range(0, tf.shape(all_token_log_probs)[0], dtype=tf.int64)  # shape (batch,)
+        next_bit_probs = tf.gather_nd(all_token_log_probs, tf.stack([batch_indices, next_bit_ids], axis=-1))
+
+        actions = next_bit_ids  # (batch,)
+        actions_log_prob = next_bit_probs  # (batch,)
+        return actions_log_prob, actions, all_token_probs
+
+    def sample_critic(self, observation, parent_obs, enc_attn_mask):
         inf_idx = len(observation[0]) - 1
         observation_input = tf.convert_to_tensor(observation, dtype=tf.float32)
         inf_idx = tf.convert_to_tensor(inf_idx, dtype=tf.int32)
-        return self._sample_critic(observation_input, parent_obs, inf_idx)
+        return self._sample_critic(observation_input, parent_obs, inf_idx, enc_attn_mask)
 
     @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
-        tf.TensorSpec(shape=(), dtype=tf.int32)
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(), dtype=tf.int32),
+        tf.TensorSpec(shape=(None, None), dtype=tf.float32),
     ])
-    def _sample_critic(self, observation_input, parent_input, inf_idx):
-        t_value = self.critic([observation_input, parent_input])  # (batch, seq_len, 2)
+    def _sample_critic(self, observation_input, parent_input, inf_idx, enc_attn_mask):
+        t_value = self.critic([observation_input, parent_input, enc_attn_mask])  # (batch, seq_len, 2)
         t_value = t_value[:, :, 0]
         return t_value
 
     @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.int32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(), dtype=tf.int32),
     ])
     def train_actor(
             self,
@@ -417,11 +512,14 @@ class TspPPO(MultiTaskAlgorithm):
             action_buffer,
             logprobability_buffer,
             advantage_buffer,
-            parent_buffer
+            parent_buffer,
+            enc_attn_mask,
+            num_actions_tensor
     ):
         with tf.GradientTape() as tape:
-            pred_probs = self.actor([observation_buffer, parent_buffer])  # shape: (batch, seq_len, 2)
-            pred_log_probs = tf.math.log(pred_probs)  # shape: (batch, seq_len, 2)
+            pred_probs = self.actor([observation_buffer, parent_buffer, enc_attn_mask])
+            # pred_probs = pred_probs[:, :, :num_actions_tensor]
+            pred_log_probs = tf.math.log(pred_probs)
             logprobability = tf.reduce_sum(
                 tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
             )  # shape (batch, seq_len)
@@ -452,7 +550,8 @@ class TspPPO(MultiTaskAlgorithm):
         self.actor_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
 
         #  KL Divergence
-        pred_probs = self.actor([observation_buffer, parent_buffer])
+        pred_probs = self.actor([observation_buffer, parent_buffer, enc_attn_mask])
+        # pred_probs = pred_probs[:, :, :num_actions_tensor]
         pred_log_probs = tf.math.log(pred_probs)
         logprobability = tf.reduce_sum(
             tf.one_hot(action_buffer, self.num_actions) * pred_log_probs, axis=-1
@@ -465,20 +564,23 @@ class TspPPO(MultiTaskAlgorithm):
         return kl, entr, policy_loss, loss
 
     @tf.function(input_signature=[
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
         tf.TensorSpec(shape=(None, None), dtype=tf.float32),
-        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
-        tf.TensorSpec(shape=(None, None, None), dtype=tf.float32),
     ])
     def train_critic(
             self,
             observation_buffer,
             return_buffer,
             parent_buffer,
+            enc_attn_mask
     ):
 
         with tf.GradientTape() as tape:  # Record operations for automatic differentiation.
             pred_values = self.critic(
-                [observation_buffer, parent_buffer])  # (batch, seq_len, 2)
+                [observation_buffer, parent_buffer, enc_attn_mask]
+            )
 
             # Value Loss (mse)
             value_loss = tf.reduce_mean((return_buffer - pred_values) ** 2)

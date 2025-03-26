@@ -67,7 +67,11 @@ class MultiTaskAlgorithm(ABC):
         print(self.curr_epoch, end=' | ')
         for key, value in self.run_info.items():
             if isinstance(value, list):
-                print("%s: %.5f" % (key, value[-1]), end=' | ')
+                v = value[-1]
+                if isinstance(v, list):
+                    print(key, v, end=' | ')
+                else:
+                    print("%s: %.5f" % (key, value[-1]), end=' | ')
             else:
                 print("%s: %.5f" % (key, value), end=' | ')
         self.populations[-1].prune()
