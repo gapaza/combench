@@ -22,7 +22,8 @@ def calc_crowding_distance(F):
         _F = _F[I, np.arange(n_obj)]
 
         # calculate the distance from each point to the last and next
-        dist = np.row_stack([_F, np.full(n_obj, np.inf)]) - np.row_stack([np.full(n_obj, -np.inf), _F])
+        # dist = np.row_stack([_F, np.full(n_obj, np.inf)]) - np.row_stack([np.full(n_obj, -np.inf), _F])
+        dist = np.vstack([_F, np.full(n_obj, np.inf)]) - np.vstack([np.full(n_obj, -np.inf), _F])
 
         # calculate the norm for each objective - set to NaN if all values are equal
         norm = np.max(_F, axis=0) - np.min(_F, axis=0)

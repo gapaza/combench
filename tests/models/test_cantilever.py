@@ -28,9 +28,9 @@ global_problem = {
         [0.0, 0.0], [0.0, 1.5], [0.0, 3.0],
         [1.2, 0.0], [1.2, 1.5], [1.2, 3.0],
         [2.4, 0.0], [2.4, 1.5], [2.4, 3.0],
-        [3.5999999999999996, 0.0], [3.5999999999999996, 1.5], [3.5999999999999996, 3.0],
+        [3.6, 0.0], [3.6, 1.5], [3.6, 3.0],
         [4.8, 0.0], [4.8, 1.5], [4.8, 3.0],
-        [6.0, 0.0], [6.0, 1.5], [6.0, 3.0]
+        # [6.0, 0.0], [6.0, 1.5], [6.0, 3.0]
     ],
     'nodes_dof': [
         [0, 0], [0, 0], [0, 0],
@@ -38,21 +38,33 @@ global_problem = {
         [1, 1], [1, 1], [1, 1],
         [1, 1], [1, 1], [1, 1],
         [1, 1], [1, 1], [1, 1],
-        [1, 1], [1, 1], [1, 1]
+        # [1, 1], [1, 1], [1, 1]
     ],
     'member_radii': 0.2,
     'youngs_modulus': 210000000000.0,
     'load_conds': [
-        [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, -1]]
+        [
+            [0, 0], [0, 0], [0, 0],
+            [0, 0], [0, 0], [0, 0],
+            [0, 0], [0, 0], [0, 0],
+            [0, 0], [0, 0], [0, 0],
+            [0, 0], [0, 0], [0, 0],
+            # [0, 0], [0, 0], [0, -1]
+        ]
     ]
 }
-load_node_idx = 17
+load_node_idx = 14
 def set_load(p, load):
     p['load_conds'][0][load_node_idx][1] = load
     return p
 def set_radii(p, radii):
     p['member_radii'] = radii
     return p
+
+
+g_problem = deepcopy(global_problem)
+g_problem = set_load(g_problem, 1.0)
+g_problem = set_radii(g_problem, 0.1)
 
 
 class TestCantilever(unittest.TestCase):
@@ -101,7 +113,9 @@ class TestCantilever(unittest.TestCase):
         model = TrussModel(problem)
 
         vector = [1 for _ in range(truss.rep.get_num_bits(problem))]
-        truss.rep.viz(problem, vector, f_name='test2.png', base_dir=config.plots_dir)
+        truss.rep.viz(problem, vector, f_name='test1.png', base_dir=config.plots_dir)
+        vector2 = truss.rep.remove_overlapping_members(problem, vector)
+        truss.rep.viz(problem, vector2, f_name='test2.png', base_dir=config.plots_dir)
 
         max_designs = [0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
                        0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0,
@@ -109,6 +123,30 @@ class TestCantilever(unittest.TestCase):
                        1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0,
                        1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0]
         truss.rep.viz(problem, max_designs, f_name='max_displacementP.png', base_dir=config.plots_dir)
+
+
+
+    def test_overlap(self):
+
+        problem = deepcopy(global_problem)
+        problem = set_load(problem, 1.0)
+        problem = set_radii(problem, 0.1)
+
+        design = [
+            [0, 2],
+            [7, 10],
+            [2, 17],
+            [17, 0]
+        ]
+
+        truss.rep.viz(problem, design, f_name='overlap.png', base_dir=config.plots_dir)
+
+        overlap_info = truss.rep.calculate_overlap_score(problem, design)
+        print(overlap_info)
+
+
+
+
 
 
 

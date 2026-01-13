@@ -4,8 +4,10 @@ import random
 import config
 import time
 import math
+import os
 
-from combench.nn.trussDecoderUMD2 import model_embed_dim
+# from combench.nn.trussDecoderUMD2 import model_embed_dim
+model_embed_dim = 32
 reduced_embed_dim = model_embed_dim - 0
 
 
@@ -49,6 +51,11 @@ class TrussModel(Model):
 
         self.norm_nodes = self.normalize_components(self.problem_formulation['nodes'], self.coord_min, self.coord_max)
         self.norm_loads = self.normalize_components(self.problem_formulation['load_conds'][0], self.load_min, self.load_max)
+
+        self.nfe = 0
+
+        self.solution_path = '/Users/gapaza/repos/ideal/combench/combench/models/truss/solutions'
+        self.fname = 'test.npz'
 
 
     def init_procs(self):
@@ -94,11 +101,22 @@ class TrussModel(Model):
         stiff_vals = truss.eval_stiffness(self.problem_formulation, design, normalize=normalize)
         # print('RETURNED STIFF VAL', stiff_vals)
         stiff = stiff_vals[0] * -1.0  # maximize stiffness_old
+        # stiff = stiff_vals[0]
         if stiff == 0:
             volfrac = 1
         else:
             volfrac = truss.eval_volfrac(self.problem_formulation, design, normalize=normalize)
+        self.nfe += 1
+        # return stiff, volfrac, self.evaluate_constraints(design)
         return stiff, volfrac
+
+    def evaluate_constraints(self, design):
+        results = truss.rep.calculate_overlap_score(self.problem_formulation, design)
+        if 'score' not in results:
+            return 100  # Bad evaluation, assume many overlaps
+        else:
+            return results['score']
+
 
     # ---------------------------------------
     # Problem Encoding
@@ -133,14 +151,12 @@ class TrussModel(Model):
             embedding = embedding[:embedding_dim]
         return embedding
 
-
     def get_padded_encoding(self, pad_len, rand=False):
         encoding = self.get_encoding(rand=rand)
         padding_mask = [1 for x in encoding]  # 1s where actual nodes are
         padding_mask += [0 for x in range(pad_len - len(encoding))]
         encoding += [[0 for x in range(reduced_embed_dim)] for x in range(pad_len - len(encoding))]
         return encoding, padding_mask
-
 
     def get_dynamic_encoding(self, number_of_neurons, pad_len):
         # Create a vector for each node with the following values:
@@ -180,9 +196,6 @@ class TrussModel(Model):
 
         return encoding, padding_mask, neuron_map, rand_neuron_indices_padded
 
-
-
-
     def normalize_components(self, items, min_val, max_val):
         norm_items = []
         for values in items:
@@ -190,7 +203,43 @@ class TrussModel(Model):
             norm_items.append(normalized_values)
         return norm_items
 
+    # ---------------------------------------
+    # Helpers
+    # ---------------------------------------
 
+    def get_problem_formulation(self):
+        return self.problem_formulation
+
+    def get_n_bits(self):
+        return truss.rep.get_num_bits(self.problem_formulation)
+
+    def convert(self, design):
+        # Returns: bit_list, bit_str, node_idx_pairs, node_coords
+        return truss.rep.convert(self.problem_formulation, design)
+
+    def get_load_nodes(self):
+        # Returns the indices of loaded nodes
+        return truss.rep.get_load_nodes(self.problem_formulation['load_conds'][0])
+
+    def get_fixed_nodes(self):
+        # Returns the indices of fixed nodes
+        return truss.rep.get_fully_fixed_nodes(self.problem_formulation)
+
+
+
+    def save_solutions(self, designs: np.ndarray):
+        print('saving solutions')
+        if not os.path.exists(self.solution_path):
+            os.makedirs(self.solution_path)
+        save_file = os.path.join(self.solution_path, self.fname)
+        np.savez(save_file, designs=designs)
+
+    def load_solutions(self):
+        load_file = os.path.join(self.solution_path, self.fname)
+        if not os.path.exists(load_file):
+            raise FileNotFoundError(f"Solution file {load_file} not found.")
+        data = np.load(load_file)
+        return data['designs']
 
 
 

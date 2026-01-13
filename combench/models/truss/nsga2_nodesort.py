@@ -96,18 +96,28 @@ class TrussPopulation(ConstrainedPop):
             design = self.create_design()
             self.designs.append(design)
 
+        # truss_problem = self.problem
+        # load_nodes = truss_problem.get_load_nodes()
+        # fixed_nodes = truss_problem.get_fixed_nodes()
+        # fixed1 = fixed_nodes[0]
+        # fixed2 = fixed_nodes[1]
+        # hardcoded_design = []
+        # for ln in load_nodes:
+        #     hardcoded_design.append([fixed1, ln])
+        #     hardcoded_design.append([fixed2, ln])
+        # hc_bitlist, hc_bitstr, hc_node_idx_pairs, hc_node_coord_pairs = truss_problem.convert(hardcoded_design)
+        # custom_design = TrussDesign(hc_bitlist, self.problem)
+        # self.designs.append(custom_design)
+
+        from combench.models.truss.nodesort import search_algorithm
         truss_problem = self.problem
-        load_nodes = truss_problem.get_load_nodes()
-        fixed_nodes = truss_problem.get_fixed_nodes()
-        fixed1 = fixed_nodes[0]
-        fixed2 = fixed_nodes[1]
-        hardcoded_design = []
-        for ln in load_nodes:
-            hardcoded_design.append([fixed1, ln])
-            hardcoded_design.append([fixed2, ln])
-        hc_bitlist, hc_bitstr, hc_node_idx_pairs, hc_node_coord_pairs = truss_problem.convert(hardcoded_design)
-        custom_design = TrussDesign(hc_bitlist, self.problem)
-        self.designs.append(custom_design)
+        designs = search_algorithm(truss_problem)
+        designs = designs.tolist()
+        for design in designs:
+            truss_design = TrussDesign(design, truss_problem)
+            self.designs.append(truss_design)
+
+
 
 
 
@@ -222,7 +232,7 @@ if __name__ == '__main__':
 
     # Population
     p_model = TrussModel(g_problem)
-    pop_size = 200
+    pop_size = 75
     ref_point = np.array([0, 1])
     pop = TrussPopulation(pop_size, ref_point, p_model)
     max_nfe = 100000
@@ -230,7 +240,9 @@ if __name__ == '__main__':
     nsga2.run()
 
     # save_dir = '/Users/gapaza/repos/ideal/combench/plots/nsga2/unconstrained'
-    save_dir = '/Users/gapaza/repos/ideal/combench/plots/nsga2/constrained'
+    save_dir = '/Users/gapaza/repos/ideal/combench/plots/nsga2/constrained5'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
     pop.plot_population(save_dir)
 
 

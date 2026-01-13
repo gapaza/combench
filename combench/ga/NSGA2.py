@@ -157,7 +157,6 @@ class NSGA2:
         self.population.plot_population(self.save_dir)
         self.population.plot_hv(self.save_dir)
         results = [(nfe, hv) for nfe, hv in zip(self.population.nfes, self.population.hv)]
-        # self.rule_mining()
         return results
 
 

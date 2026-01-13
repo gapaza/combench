@@ -104,6 +104,52 @@ def plot_select_designs(problem, designs, save_dir):
         truss.rep.viz(problem, pd.vector, f_name=f'design_{idx}.png', base_dir=save_dir)
 
 
+def plot_feasible_designs(problem, designs, save_dir):
+    pareto_designs = [design for design in designs if design.is_feasible is True]
+    pareto_designs_strs = [design.get_design_str() for design in pareto_designs]
+
+    # only retain unique designs
+    pareto_designs_unique = []
+    pareto_designs_unique_strs = []
+    for idx, design in enumerate(pareto_designs):
+        if design.get_design_str() not in pareto_designs_unique_strs:
+            pareto_designs_unique.append(design)
+            pareto_designs_unique_strs.append(design.get_design_str())
+    pareto_designs = pareto_designs_unique
+
+    pareto_designs_po = [design.get_plotting_objectives() for design in pareto_designs]
+    pareto_designs_zip = list(zip(range(len(pareto_designs_po)), pareto_designs_po))
+    pareto_designs_zip = sorted(pareto_designs_zip, key=lambda x: x[1][0])
+    pareto_designs = [pareto_designs[idx] for idx, _ in pareto_designs_zip]
+
+    for idx, pd in enumerate(pareto_designs):
+        truss.rep.viz(problem, pd.vector, f_name=f'design_{idx}.png', base_dir=save_dir)
+
+
+def plot_any_designs(problem, designs, save_dir):
+    pareto_designs = [design for design in designs]
+    pareto_designs_strs = [design.get_design_str() for design in pareto_designs]
+
+    # only retain unique designs
+    pareto_designs_unique = []
+    pareto_designs_unique_strs = []
+    for idx, design in enumerate(pareto_designs):
+        if design.get_design_str() not in pareto_designs_unique_strs:
+            pareto_designs_unique.append(design)
+            pareto_designs_unique_strs.append(design.get_design_str())
+    pareto_designs = pareto_designs_unique
+
+    pareto_designs_po = [design.get_plotting_objectives() for design in pareto_designs]
+    pareto_designs_zip = list(zip(range(len(pareto_designs_po)), pareto_designs_po))
+    pareto_designs_zip = sorted(pareto_designs_zip, key=lambda x: x[1][0])
+    pareto_designs = [pareto_designs[idx] for idx, _ in pareto_designs_zip]
+
+    for idx, pd in enumerate(pareto_designs):
+        truss.rep.viz(problem, pd.vector, f_name=f'design_{idx}.png', base_dir=save_dir)
+
+
+
+
 def plot_all_designs(designs, all_plot_file):
     x_vals_f, y_vals_f = [], []
     x_vals_i, y_vals_i = [], []

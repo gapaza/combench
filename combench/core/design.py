@@ -43,7 +43,7 @@ class Design(ABC):
     def crossover(self, p1_design, p2_design, c_type='uniform'):
         if c_type == 'point':
             crossover_point = random.randint(1, self.num_vars)
-            child_vector = list(np.concatenate((p1_design.vector[:crossover_point], p2_design.vector[crossover_point:])))
+            child_vector = p1_design.vector[:crossover_point] + p2_design.vector[crossover_point:]
         elif c_type == 'uniform':
             child_vector = [random.choice([m_bit, f_bit]) for m_bit, f_bit in zip(p1_design.vector, p2_design.vector)]
         else:

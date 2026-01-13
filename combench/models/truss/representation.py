@@ -1,11 +1,15 @@
 import random
 import textwrap
+from itertools import combinations
+import math
+import numpy as np
+
 
 """ 
 ----- Design Representations -----
 
- - Bit List
- - Bit Str
+ - Bit List: [0, 1, 1, 1, 0, 0, ..., 1]
+ - Bit Str: '011100...1'
  - List of node index pairs: [
           [0, 1],
           [0, 2]
@@ -21,22 +25,23 @@ import textwrap
  - Nodes must always be ordered by x-coordinate, then y-coordinate
     problem = {
         'nodes': [  # Node coordinate system is in meters
-            (0, 0), (0, 1), 
+            (0, 0), (0, 1), (0, 2), (0, 3),
             (1, 0), (1, 1), (1, 2), (1, 3),
             (2, 0), (2, 1), (2, 2), (2, 3),
-            (3, 0), (3, 1), (3, 2), (3, 3),
+            (3, 0), (3, 1), (3, 2), (3, 3)
         ],
         'nodes_dof': [  # Encodes which degrees of freedom are fixed for each node
             (0, 0), (1, 1), (1, 1), (1, 1),
             (0, 0), (1, 1), (1, 1), (1, 1),
             (0, 0), (1, 1), (1, 1), (1, 1),
-            (0, 0), (1, 1), (1, 1), (1, 1),
+            (0, 0), (1, 1), (1, 1), (1, 1)
         ],
         'load_conds': [ # Encodes the loads applied to each node in each direction (newtons)
             [  # Multiple load conditions can be specified
-                (0, 0), (0, 0),
-                (1, 1), (1, 1),
-                (1, 1), (1, 1),
+                (0, 0), (0, 0), (1, 1), (1, 1),
+                (0, 0), (0, 0), (0, 0), (0, 0),
+                (0, 0), (0, 0), (0, 0), (0, 0),
+                (0, 0), (0, 0), (0, 0), (0, 0)
             ]
         ],
         'member_radii': 0.1,         # Radii is in meters
@@ -45,16 +50,39 @@ import textwrap
 """
 
 
-def sort_nodes(problem):
+def sort_nodes_old(problem):
     nodes = sorted(problem['nodes'], key=lambda x: (x[0], x[1]))
     problem['nodes'] = nodes
     return nodes
+
+def sort_nodes(problem):
+    # 1. Create a range of indices [0, 1, 2, ... N-1]
+    indices = range(len(problem['nodes']))
+
+    # 2. Sort the INDICES based on the values in problem['nodes']
+    # We look up the node at index 'i' to determine the sort order
+    sorted_indices = sorted(indices, key=lambda i: problem['nodes'][i])
+
+    # 3. Apply this new order to 'nodes'
+    problem['nodes'] = [problem['nodes'][i] for i in sorted_indices]
+
+    # 4. Apply this new order to 'nodes_dof'
+    problem['nodes_dof'] = [problem['nodes_dof'][i] for i in sorted_indices]
+
+    # 5. Apply this new order to each load condition list
+    # We iterate over every load case and reorder the inner list
+    problem['load_conds'] = [
+        [case[i] for i in sorted_indices]
+        for case in problem['load_conds']
+    ]
+
+    return problem['nodes']
 
 
 def convert(problem, orig_rep):
     problem['nodes'] = sort_nodes(problem)
     nodes = problem['nodes']
-    bit_members = get_bit_members(problem)
+    bit_members = get_bit_members(problem) # List of node index pairs, each pair corresponds to a bit position
 
     bit_list = None
     bit_str = ''
@@ -73,7 +101,7 @@ def convert(problem, orig_rep):
             bit_list = orig_rep
         elif isinstance(first_element, tuple) or isinstance(first_element, list):
             ff_element = first_element[0]
-            if isinstance(ff_element, int):
+            if isinstance(ff_element, int): # Node index pairs
                 node_idx_pairs = orig_rep
                 bit_list = []
                 for bm in bit_members:
@@ -81,7 +109,7 @@ def convert(problem, orig_rep):
                         bit_list.append(1)
                     else:
                         bit_list.append(0)
-            else:
+            else: # Node coodinate pairs
                 node_coords = orig_rep
                 # Convert to node index pairs
                 node_idx_pairs = []
@@ -276,7 +304,6 @@ def get_node_connections(problem, design_rep, node_idx):
 # ------------------------------
 # Sampling
 # ------------------------------
-from itertools import combinations
 
 
 def random_sample_1(problem):  # Random bit list
@@ -515,11 +542,6 @@ def calc_length(node_coords_pair):
     return ((q.x - p.x)**2 + (q.y - p.y)**2)**0.5
 
 
-class Point:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
 
 def onSegment(p, q, r):
     if ( (q.x <= max(p.x, r.x)) and (q.x >= min(p.x, r.x)) and
@@ -606,12 +628,151 @@ def _doIntersect(p1, q1, p2, q2):
     # If none of the cases
     return False, 0.0
 
+# ------------------------------
+# Overlap Score
+# ------------------------------
+
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+def calculate_overlap_score(problem, design_rep):
+    """
+    Calculates a penalty score based on geometric violations, correctly handling
+    collinear members that share a node.
+    """
+    # 1. Standardize the input
+    # (Assuming convert is available in the scope or imported)
+    _, _, node_idx_pairs, node_coords_pairs = convert(problem, design_rep)
+
+    crossing_violations = 0
+    collinear_violations = 0
+
+    num_members = len(node_idx_pairs)
+
+    # 2. Iterate through every unique pair of members
+    for i in range(num_members):
+        for j in range(i + 1, num_members):
+
+            # Indices
+            indices_1 = node_idx_pairs[i]
+            indices_2 = node_idx_pairs[j]
+
+            # Check for shared node
+            set_1 = set(indices_1)
+            set_2 = set(indices_2)
+            shared = set_1.intersection(set_2)
+            has_shared_node = len(shared) > 0
+
+            # Coordinates
+            coords_1 = node_coords_pairs[i]  # [[x1, y1], [x2, y2]]
+            coords_2 = node_coords_pairs[j]  # [[x3, y3], [x4, y4]]
+
+            p1 = Point(*coords_1[0])
+            q1 = Point(*coords_1[1])
+            p2 = Point(*coords_2[0])
+            q2 = Point(*coords_2[1])
+
+            # 3. Perform Geometry Check
+            overlap_type = check_overlap_type(p1, q1, p2, q2)
+
+            if overlap_type == 'collinear':
+                if not has_shared_node:
+                    # Case A: Disjoint but overlapping (e.g. parallel lines merging)
+                    # Always a violation
+                    collinear_violations += 1
+                else:
+                    # Case B: Collinear AND Share a node.
+                    # We must distinguish between:
+                    # 1. Valid: A-B-C (Opposite directions from B)
+                    # 2. Invalid: A-B and A-C (Same direction from A, i.e., overlap)
+
+                    # Identify the shared node coordinate and the two "tail" coordinates
+                    shared_idx = list(shared)[0]
+
+                    # Find coordinates of the shared node
+                    # (We simply match the index to the coord list)
+                    if indices_1[0] == shared_idx:
+                        shared_pt = coords_1[0]
+                        tail_1 = coords_1[1]
+                    else:
+                        shared_pt = coords_1[1]
+                        tail_1 = coords_1[0]
+
+                    if indices_2[0] == shared_idx:
+                        # shared_pt matches coords_2[0] (sanity check implies yes)
+                        tail_2 = coords_2[1]
+                    else:
+                        tail_2 = coords_2[0]
+
+                    # Create vectors from the shared node to the tails
+                    vec1 = (tail_1[0] - shared_pt[0], tail_1[1] - shared_pt[1])
+                    vec2 = (tail_2[0] - shared_pt[0], tail_2[1] - shared_pt[1])
+
+                    # Calculate Dot Product
+                    dot_product = vec1[0] * vec2[0] + vec1[1] * vec2[1]
+
+                    # If Dot Product > 0, vectors point in same direction -> OVERLAP
+                    # If Dot Product < 0, vectors point in opposite directions -> NO OVERLAP (Straight line)
+                    if dot_product > 0:
+                        collinear_violations += 1
+
+            elif overlap_type == 'crossing':
+                # If they cross but share a node, it's just a joint (V-shape), which is valid.
+                if not has_shared_node:
+                    crossing_violations += 1
+
+    total_score = crossing_violations + collinear_violations
+
+    return {
+        'score': total_score,
+        'crossings': crossing_violations,
+        'collinear': collinear_violations
+    }
+
+def check_overlap_type(p1, q1, p2, q2):
+    """
+    Standard geometric intersection test.
+    """
+
+    # 1. Orientation Helper
+    def orientation(p, q, r):
+        val = (float(q.y - p.y) * (r.x - q.x)) - (float(q.x - p.x) * (r.y - q.y))
+        if val > 0: return 1  # Clockwise
+        if val < 0: return 2  # Counterclockwise
+        return 0  # Collinear
+
+    # 2. OnSegment Helper
+    def on_segment(p, q, r):
+        if ((q.x <= max(p.x, r.x)) and (q.x >= min(p.x, r.x)) and
+                (q.y <= max(p.y, r.y)) and (q.y >= min(p.y, r.y))):
+            return True
+        return False
+
+    o1 = orientation(p1, q1, p2)
+    o2 = orientation(p1, q1, q2)
+    o3 = orientation(p2, q2, p1)
+    o4 = orientation(p2, q2, q1)
+
+    # General Crossing
+    if (o1 != o2) and (o3 != o4):
+        return 'crossing'
+
+    # Special Collinear Cases
+    # Returns 'collinear' if ANY point of one segment lies on the other
+    if (o1 == 0) and on_segment(p1, p2, q1): return 'collinear'
+    if (o2 == 0) and on_segment(p1, q2, q1): return 'collinear'
+    if (o3 == 0) and on_segment(p2, p1, q2): return 'collinear'
+    if (o4 == 0) and on_segment(p2, q1, q2): return 'collinear'
+
+    return 'none'
 
 # ------------------------------
 # Angles
 # ------------------------------
-import math
-import numpy as np
 
 
 def get_bit_angles(problem):

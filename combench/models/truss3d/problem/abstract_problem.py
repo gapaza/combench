@@ -25,14 +25,16 @@ class AbstractProblem(ABC):
     # -------------------------------------------------------
 
     @staticmethod
-    def get_mesh(x_range, x_res, y_range, y_res):
+    def get_mesh(x_range, x_res, y_range, y_res, z_range, z_res):
         x = np.linspace(0, x_range, x_res)
         y = np.linspace(0, y_range, y_res)
+        z = np.linspace(0, z_range, z_res)
         nodes = []
         for i in x:
             for j in y:
-                nodes.append([i, j])
-        nodes = sorted(nodes, key=lambda x: (x[0], x[1]))
+                for k in z:
+                    nodes.append([i, j, k])
+        nodes = sorted(nodes, key=lambda x: (x[0], x[1], x[2]))
         return nodes
 
     @staticmethod
@@ -65,7 +67,7 @@ class AbstractProblem(ABC):
         other_nodes = [x for x in range(n_nodes) if x not in (edge_nodes + load_nodes + fixed_nodes)]
         droppable_nodes = []
         droppable_nodes.extend(other_nodes)
-        if len(fixed_nodes) > 2:
+        if len(fixed_nodes) > 3:
             droppable_nodes.extend(fixed_nodes[:-2])
         non_load_edge_nodes = [x for x in edge_nodes if x not in (load_nodes + fixed_nodes)]
         droppable_nodes.extend(non_load_edge_nodes)
@@ -83,7 +85,7 @@ class AbstractProblem(ABC):
     def clear_loads(problem):
         for idx1, load_cond in enumerate(problem['load_conds']):
             for idx2, n_load in enumerate(load_cond):
-                problem['load_conds'][idx1][idx2] = [0, 0]
+                problem['load_conds'][idx1][idx2] = [0, 0, 0]
         return problem
 
 
